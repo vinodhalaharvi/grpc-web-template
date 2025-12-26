@@ -1,0 +1,46 @@
+version: "3.8"
+
+services:
+  # ============================================
+  # gRPC Server (Go)
+  # ============================================
+  grpc-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    ports:
+      - "50051:50051"  # Expose for grpcurl testing
+    networks:
+      - grpc-web-demo
+
+  # ============================================
+  # Envoy Proxy (gRPC-Web translation)
+  # ============================================
+  envoy:
+    image: envoyproxy/envoy:v1.28-latest
+    volumes:
+      - ./envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+    ports:
+      - "8080:8080"    # gRPC-Web for browsers
+      - "9901:9901"    # Envoy admin UI
+    depends_on:
+      - grpc-server
+    networks:
+      - grpc-web-demo
+    command: /usr/local/bin/envoy -c /etc/envoy/envoy.yaml --log-level info
+
+  # ============================================
+  # Web Server (serves static HTML)
+  # ============================================
+  web:
+    image: nginx:alpine
+    volumes:
+      - ./web:/usr/share/nginx/html:ro
+    ports:
+      - "3000:80"
+    networks:
+      - grpc-web-demo
+
+networks:
+  grpc-web-demo:
+    driver: bridge

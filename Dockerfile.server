@@ -1,0 +1,41 @@
+# Stage 1: Generate protobuf code using official buf image
+FROM bufbuild/buf:latest AS buf-generate
+
+WORKDIR /app
+COPY buf.yaml buf.gen.yaml ./
+COPY proto/ proto/
+
+RUN buf generate
+
+# Stage 2: Build Go binary
+FROM golang:1.25-alpine AS builder
+
+RUN apk add --no-cache git
+
+WORKDIR /app
+
+# Copy Go files
+COPY go.mod ./
+RUN go mod download || true
+
+COPY server/ server/
+
+# Copy generated code from buf stage
+COPY --from=buf-generate /app/gen gen/
+
+# Tidy dependencies (populates go.sum with generated code deps)
+RUN go mod tidy
+
+# Build
+RUN CGO_ENABLED=0 GOOS=linux go build -o /grpc-server ./server
+
+# Stage 3: Runtime
+FROM alpine:3.19
+
+RUN apk --no-cache add ca-certificates
+
+COPY --from=builder /grpc-server /grpc-server
+
+EXPOSE 50051
+
+CMD ["/grpc-server"]

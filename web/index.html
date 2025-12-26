@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>gRPC-Web Demo</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #e0e0e0;
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+    .container {
+      max-width: 700px;
+      margin: 0 auto;
+    }
+    header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    h1 {
+      font-size: 2.5rem;
+      margin-bottom: 10px;
+      background: linear-gradient(90deg, #818cf8, #c084fc);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle {
+      color: #888;
+      font-size: 1.1rem;
+    }
+    .card {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      padding: 30px;
+      margin-bottom: 20px;
+      backdrop-filter: blur(10px);
+    }
+    .card h2 {
+      font-size: 1.2rem;
+      margin-bottom: 20px;
+      color: #a0a0c0;
+    }
+    .input-group {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    input {
+      flex: 1;
+      padding: 12px 16px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      color: #e0e0e0;
+      font-size: 16px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus {
+      border-color: #818cf8;
+    }
+    input::placeholder {
+      color: #666;
+    }
+    button {
+      padding: 12px 24px;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      border: none;
+      border-radius: 8px;
+      color: white;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    button:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 20px rgba(99, 102, 241, 0.4);
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .response {
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 8px;
+      padding: 20px;
+      min-height: 100px;
+    }
+    .response-item {
+      padding: 10px 15px;
+      background: rgba(99, 102, 241, 0.1);
+      border-left: 3px solid #6366f1;
+      border-radius: 0 8px 8px 0;
+      margin-bottom: 10px;
+    }
+    .response-item .message {
+      font-size: 1.1rem;
+      margin-bottom: 5px;
+    }
+    .response-item .meta {
+      font-size: 0.85rem;
+      color: #888;
+    }
+    .empty {
+      color: #666;
+      font-style: italic;
+      text-align: center;
+      padding: 20px;
+    }
+    .error {
+      background: rgba(239, 68, 68, 0.1);
+      border-left-color: #ef4444;
+      color: #fca5a5;
+    }
+    .streaming {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: #4ade80;
+      margin-bottom: 15px;
+    }
+    .streaming .dot {
+      width: 8px;
+      height: 8px;
+      background: #4ade80;
+      border-radius: 50%;
+      animation: pulse 1s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+    .architecture {
+      font-family: monospace;
+      font-size: 0.9rem;
+      background: rgba(0, 0, 0, 0.3);
+      padding: 20px;
+      border-radius: 8px;
+      white-space: pre;
+      overflow-x: auto;
+      line-height: 1.6;
+    }
+    .architecture .arrow { color: #818cf8; }
+    .architecture .label { color: #4ade80; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- React -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  
+  <!-- gRPC-Web library -->
+  <script src="https://cdn.jsdelivr.net/npm/grpc-web@1.5.0/dist/grpc-web.min.js"></script>
+  
+  <!-- Babel for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel">
+    const { useState, useCallback } = React;
+
+    // =========================================================================
+    // gRPC-Web Client (manually constructed since we don't have generated code)
+    // 
+    // In production, you'd use buf generate to create typed clients.
+    // This shows the underlying mechanism.
+    // =========================================================================
+
+    const ENVOY_URL = 'http://localhost:8080';
+
+    // gRPC-Web request helper
+    async function grpcWebUnary(service, method, request) {
+      const url = `${ENVOY_URL}/${service}/${method}`;
+      
+      // Encode request as protobuf (simplified - using JSON for demo)
+      // Real gRPC-Web uses binary protobuf encoding
+      const body = encodeGrpcWebRequest(request);
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/grpc-web+proto',
+          'X-Grpc-Web': '1',
+        },
+        body: body,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      return decodeGrpcWebResponse(await response.arrayBuffer());
+    }
+
+    // For streaming, we need to handle chunked responses
+    async function* grpcWebStream(service, method, request) {
+      const url = `${ENVOY_URL}/${service}/${method}`;
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/grpc-web+proto',
+          'X-Grpc-Web': '1',
+        },
+        body: encodeGrpcWebRequest(request),
+      });
+
+      const reader = response.body.getReader();
+      let buffer = new Uint8Array(0);
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        // Append to buffer
+        const newBuffer = new Uint8Array(buffer.length + value.length);
+        newBuffer.set(buffer);
+        newBuffer.set(value, buffer.length);
+        buffer = newBuffer;
+
+        // Try to extract complete messages
+        while (buffer.length >= 5) {
+          const frameType = buffer[0];
+          const length = (buffer[1] << 24) | (buffer[2] << 16) | (buffer[3] << 8) | buffer[4];
+          
+          if (buffer.length < 5 + length) break;
+
+          const messageBytes = buffer.slice(5, 5 + length);
+          buffer = buffer.slice(5 + length);
+
+          if (frameType === 0) {
+            // Data frame
+            yield decodeMessage(messageBytes);
+          }
+          // frameType 128 = trailers (end of stream)
+        }
+      }
+    }
+
+    // =========================================================================
+    // Protobuf encoding/decoding (simplified for demo)
+    // 
+    // Real implementation would use protobuf.js or generated code
+    // =========================================================================
+
+    function encodeGrpcWebRequest(obj) {
+      // Encode message using simple protobuf encoding
+      const message = encodeMessage(obj);
+      
+      // gRPC-Web frame: 1 byte flags + 4 bytes length + message
+      const frame = new Uint8Array(5 + message.length);
+      frame[0] = 0; // No compression
+      frame[1] = (message.length >> 24) & 0xff;
+      frame[2] = (message.length >> 16) & 0xff;
+      frame[3] = (message.length >> 8) & 0xff;
+      frame[4] = message.length & 0xff;
+      frame.set(message, 5);
+      
+      return frame;
+    }
+
+    function encodeMessage(obj) {
+      // Simple protobuf encoding for SayHelloRequest { name: string }
+      // Field 1, wire type 2 (length-delimited) = tag 0x0a
+      const name = obj.name || '';
+      const nameBytes = new TextEncoder().encode(name);
+      
+      const result = new Uint8Array(2 + nameBytes.length);
+      result[0] = 0x0a; // field 1, wire type 2
+      result[1] = nameBytes.length;
+      result.set(nameBytes, 2);
+      
+      return result;
+    }
+
+    function decodeGrpcWebResponse(buffer) {
+      const bytes = new Uint8Array(buffer);
+      
+      // Skip 5-byte gRPC frame header
+      if (bytes.length < 5) throw new Error('Response too short');
+      
+      const messageBytes = bytes.slice(5);
+      return decodeMessage(messageBytes);
+    }
+
+    function decodeMessage(bytes) {
+      // Simple protobuf decoding for SayHelloResponse { message: string, count: int32 }
+      const result = { message: '', count: 0 };
+      let pos = 0;
+      
+      while (pos < bytes.length) {
+        const tag = bytes[pos++];
+        const fieldNumber = tag >> 3;
+        const wireType = tag & 0x7;
+        
+        if (fieldNumber === 1 && wireType === 2) {
+          // message field (string)
+          const len = bytes[pos++];
+          result.message = new TextDecoder().decode(bytes.slice(pos, pos + len));
+          pos += len;
+        } else if (fieldNumber === 2 && wireType === 0) {
+          // count field (varint)
+          result.count = bytes[pos++];
+        } else {
+          break; // Unknown field, stop
+        }
+      }
+      
+      return result;
+    }
+
+    // =========================================================================
+    // React Components
+    // =========================================================================
+
+    function UnaryDemo() {
+      const [name, setName] = useState('');
+      const [response, setResponse] = useState(null);
+      const [error, setError] = useState(null);
+      const [loading, setLoading] = useState(false);
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        setError(null);
+        setResponse(null);
+
+        try {
+          const result = await grpcWebUnary(
+            'hello.v1.GreeterService',
+            'SayHello',
+            { name: name || 'World' }
+          );
+          setResponse(result);
+        } catch (e) {
+          setError(e.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      return (
+        <div className="card">
+          <h2>🎯 Unary RPC: SayHello</h2>
+          <form onSubmit={handleSubmit}>
+            <div className="input-group">
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Enter your name..."
+                disabled={loading}
+              />
+              <button type="submit" disabled={loading}>
+                {loading ? 'Calling...' : 'Say Hello'}
+              </button>
+            </div>
+          </form>
+          <div className="response">
+            {!response && !error && <div className="empty">Response will appear here</div>}
+            {error && (
+              <div className="response-item error">
+                <div className="message">Error: {error}</div>
+              </div>
+            )}
+            {response && (
+              <div className="response-item">
+                <div className="message">{response.message}</div>
+                <div className="meta">Request #{response.count}</div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function StreamingDemo() {
+      const [name, setName] = useState('');
+      const [responses, setResponses] = useState([]);
+      const [streaming, setStreaming] = useState(false);
+      const [error, setError] = useState(null);
+
+      const handleStream = async (e) => {
+        e.preventDefault();
+        setStreaming(true);
+        setResponses([]);
+        setError(null);
+
+        try {
+          for await (const msg of grpcWebStream(
+            'hello.v1.GreeterService',
+            'SayHelloStream',
+            { name: name || 'World' }
+          )) {
+            setResponses((prev) => [...prev, msg]);
+          }
+        } catch (e) {
+          setError(e.message);
+        } finally {
+          setStreaming(false);
+        }
+      };
+
+      return (
+        <div className="card">
+          <h2>📡 Server Streaming RPC: SayHelloStream</h2>
+          <form onSubmit={handleStream}>
+            <div className="input-group">
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Enter your name..."
+                disabled={streaming}
+              />
+              <button type="submit" disabled={streaming}>
+                {streaming ? 'Streaming...' : 'Start Stream'}
+              </button>
+            </div>
+          </form>
+          <div className="response">
+            {streaming && (
+              <div className="streaming">
+                <div className="dot"></div>
+                <span>Receiving messages...</span>
+              </div>
+            )}
+            {!streaming && responses.length === 0 && !error && (
+              <div className="empty">Stream responses will appear here</div>
+            )}
+            {error && (
+              <div className="response-item error">
+                <div className="message">Error: {error}</div>
+              </div>
+            )}
+            {responses.map((resp, i) => (
+              <div key={i} className="response-item">
+                <div className="message">{resp.message}</div>
+                <div className="meta">Request #{resp.count}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    function Architecture() {
+      return (
+        <div className="card">
+          <h2>🏗️ How It Works</h2>
+          <div className="architecture">
+{`┌─────────────────┐     gRPC-Web      ┌─────────────────┐       gRPC       ┌─────────────────┐
+│                 │    (HTTP/1.1)     │                 │     (HTTP/2)     │                 │
+│     Browser     │ ───────────────▶  │      Envoy      │ ───────────────▶ │   gRPC Server   │
+│                 │                   │    (proxy)      │                  │      (Go)       │
+│   This HTML!    │ ◀───────────────  │    :8080        │ ◀─────────────── │     :50051      │
+│                 │                   │                 │                  │                 │
+└─────────────────┘                   └─────────────────┘                  └─────────────────┘
+
+<span class="label">Browser sends:</span>
+  POST /hello.v1.GreeterService/SayHello
+  Content-Type: application/grpc-web+proto
+  X-Grpc-Web: 1
+  [5-byte frame header][protobuf message]
+
+<span class="label">Envoy translates to gRPC:</span>
+  HTTP/2 POST /hello.v1.GreeterService/SayHello
+  Content-Type: application/grpc
+  [grpc frame][protobuf message]
+
+<span class="label">gRPC Server responds, Envoy translates back!</span>`}
+          </div>
+        </div>
+      );
+    }
+
+    function App() {
+      return (
+        <div className="container">
+          <header>
+            <h1>gRPC-Web Demo</h1>
+            <p className="subtitle">Browser → Envoy → gRPC Server</p>
+          </header>
+
+          <Architecture />
+          <UnaryDemo />
+          <StreamingDemo />
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
