@@ -6,3 +6,14 @@ grpc-web-demo.iml
 modules.xml
 vcs.xml
 workspace.xml
+go
+ts
+copilot.data.migration.agent.xml
+copilot.data.migration.ask.xml
+copilot.data.migration.ask2agent.xml
+copilot.data.migration.edit.xml
+grpc-web-demo.iml
+modules.xml
+protoeditor.xml
+vcs.xml
+workspace.xml

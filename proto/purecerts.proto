@@ -1,0 +1,986 @@
+syntax = "proto3";
+
+package purecerts.v1;
+
+option go_package = "github.com/purecerts/api/gen/purecerts/v1;purecertsv1";
+
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// COMMON TYPES
+
+message Pagination {
+  int32 page = 1;
+  int32 limit = 2;
+  int32 total = 3;
+  int32 total_pages = 4;
+}
+
+message Subject {
+  string common_name = 1;
+  string organization = 2;
+  string organizational_unit = 3;
+  string country = 4;
+  string state = 5;
+  string locality = 6;
+}
+
+message Metadata {
+  map<string, string> labels = 1;
+}
+
+enum KeyAlgorithm {
+  KEY_ALGORITHM_UNSPECIFIED = 0;
+  KEY_ALGORITHM_RSA = 1;
+  KEY_ALGORITHM_ECDSA = 2;
+  KEY_ALGORITHM_ED25519 = 3;
+}
+
+enum CertificateStatus {
+  CERTIFICATE_STATUS_UNSPECIFIED = 0;
+  CERTIFICATE_STATUS_ACTIVE = 1;
+  CERTIFICATE_STATUS_EXPIRING = 2;
+  CERTIFICATE_STATUS_EXPIRED = 3;
+  CERTIFICATE_STATUS_REVOKED = 4;
+}
+
+enum RevocationReason {
+  REVOCATION_REASON_UNSPECIFIED = 0;
+  REVOCATION_REASON_KEY_COMPROMISE = 1;
+  REVOCATION_REASON_CA_COMPROMISE = 2;
+  REVOCATION_REASON_AFFILIATION_CHANGED = 3;
+  REVOCATION_REASON_SUPERSEDED = 4;
+  REVOCATION_REASON_CESSATION_OF_OPERATION = 5;
+  REVOCATION_REASON_CERTIFICATE_HOLD = 6;
+  REVOCATION_REASON_REMOVE_FROM_CRL = 7;
+  REVOCATION_REASON_PRIVILEGE_WITHDRAWN = 8;
+  REVOCATION_REASON_AA_COMPROMISE = 9;
+}
+
+enum DownloadFormat {
+  DOWNLOAD_FORMAT_UNSPECIFIED = 0;
+  DOWNLOAD_FORMAT_PEM = 1;
+  DOWNLOAD_FORMAT_DER = 2;
+  DOWNLOAD_FORMAT_PKCS12 = 3;
+  DOWNLOAD_FORMAT_PKCS7 = 4;
+}
+
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  ROLE_ADMIN = 1;
+  ROLE_OPERATOR = 2;
+  ROLE_VIEWER = 3;
+}
+
+// =============================================================================
+// AUTH SERVICE
+// =============================================================================
+
+service AuthService {
+  rpc Register(RegisterRequest) returns (AuthResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/register"
+      body: "*"
+    };
+  }
+
+  rpc Login(LoginRequest) returns (AuthResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/login"
+      body: "*"
+    };
+  }
+
+  rpc RefreshToken(RefreshTokenRequest) returns (AuthResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/refresh"
+      body: "*"
+    };
+  }
+
+  rpc Logout(google.protobuf.Empty) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      post: "/v1/auth/logout"
+    };
+  }
+
+  rpc GetCurrentUser(google.protobuf.Empty) returns (User) {
+    option (google.api.http) = {
+      get: "/v1/auth/me"
+    };
+  }
+}
+
+message RegisterRequest {
+  string email = 1;
+  string password = 2;
+  string first_name = 3;
+  string last_name = 4;
+  string company = 5;
+}
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message AuthResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  int64 expires_in = 3;
+  User user = 4;
+}
+
+message User {
+  string user_id = 1;
+  string email = 2;
+  string first_name = 3;
+  string last_name = 4;
+  Role role = 5;
+  string tenant_id = 6;
+}
+
+// =============================================================================
+// TENANT SERVICE
+// =============================================================================
+
+service TenantService {
+  rpc GetTenant(GetTenantRequest) returns (Tenant) {
+    option (google.api.http) = {
+      get: "/v1/tenants/{tenant_id}"
+    };
+  }
+
+  rpc UpdateTenant(UpdateTenantRequest) returns (Tenant) {
+    option (google.api.http) = {
+      patch: "/v1/tenants/{tenant_id}"
+      body: "*"
+    };
+  }
+
+  rpc ListTenantUsers(ListTenantUsersRequest) returns (ListTenantUsersResponse) {
+    option (google.api.http) = {
+      get: "/v1/tenants/{tenant_id}/users"
+    };
+  }
+
+  rpc InviteUser(InviteUserRequest) returns (User) {
+    option (google.api.http) = {
+      post: "/v1/tenants/{tenant_id}/users/invite"
+      body: "*"
+    };
+  }
+}
+
+message Tenant {
+  string tenant_id = 1;
+  string name = 2;
+  TenantSettings settings = 3;
+  TenantLimits limits = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message TenantSettings {
+  string default_ca = 1;
+  int32 default_validity_days = 2;
+  bool auto_renewal = 3;
+  string notification_email = 4;
+}
+
+message TenantLimits {
+  int32 max_certificates = 1;
+  int32 current_certificates = 2;
+  int32 max_cas = 3;
+  int32 current_cas = 4;
+}
+
+message GetTenantRequest {
+  string tenant_id = 1;
+}
+
+message UpdateTenantRequest {
+  string tenant_id = 1;
+  string name = 2;
+  TenantSettings settings = 3;
+}
+
+message ListTenantUsersRequest {
+  string tenant_id = 1;
+  int32 page = 2;
+  int32 limit = 3;
+  Role role = 4;
+}
+
+message ListTenantUsersResponse {
+  repeated User users = 1;
+  Pagination pagination = 2;
+}
+
+message InviteUserRequest {
+  string tenant_id = 1;
+  string email = 2;
+  Role role = 3;
+  repeated string permissions = 4;
+}
+
+// =============================================================================
+// CERTIFICATE SERVICE
+// =============================================================================
+
+service CertificateService {
+  rpc ListCertificates(ListCertificatesRequest) returns (ListCertificatesResponse) {
+    option (google.api.http) = {
+      get: "/v1/certificates"
+    };
+  }
+
+  rpc GetCertificate(GetCertificateRequest) returns (Certificate) {
+    option (google.api.http) = {
+      get: "/v1/certificates/{cert_id}"
+    };
+  }
+
+  rpc IssueCertificate(IssueCertificateRequest) returns (Certificate) {
+    option (google.api.http) = {
+      post: "/v1/certificates/issue"
+      body: "*"
+    };
+  }
+
+  rpc GenerateCertificate(GenerateCertificateRequest) returns (CertificateWithKey) {
+    option (google.api.http) = {
+      post: "/v1/certificates/generate"
+      body: "*"
+    };
+  }
+
+  rpc RenewCertificate(RenewCertificateRequest) returns (Certificate) {
+    option (google.api.http) = {
+      post: "/v1/certificates/{cert_id}/renew"
+      body: "*"
+    };
+  }
+
+  rpc RevokeCertificate(RevokeCertificateRequest) returns (Certificate) {
+    option (google.api.http) = {
+      post: "/v1/certificates/{cert_id}/revoke"
+      body: "*"
+    };
+  }
+
+  rpc DeleteCertificate(DeleteCertificateRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/certificates/{cert_id}"
+    };
+  }
+
+  rpc DownloadCertificate(DownloadCertificateRequest) returns (DownloadCertificateResponse) {
+    option (google.api.http) = {
+      get: "/v1/certificates/{cert_id}/download"
+    };
+  }
+
+  rpc UpdateCertificateTags(UpdateCertificateTagsRequest) returns (Certificate) {
+    option (google.api.http) = {
+      patch: "/v1/certificates/{cert_id}/tags"
+      body: "*"
+    };
+  }
+
+  rpc UpdateCertificateMetadata(UpdateCertificateMetadataRequest) returns (Certificate) {
+    option (google.api.http) = {
+      patch: "/v1/certificates/{cert_id}/metadata"
+      body: "*"
+    };
+  }
+
+  rpc BulkOperation(BulkOperationRequest) returns (BulkOperationResponse) {
+    option (google.api.http) = {
+      post: "/v1/certificates/bulk"
+      body: "*"
+    };
+  }
+
+  rpc ValidateCertificate(ValidateCertificateRequest) returns (ValidateCertificateResponse) {
+    option (google.api.http) = {
+      post: "/v1/certificates/validate"
+      body: "*"
+    };
+  }
+}
+
+message Certificate {
+  string cert_id = 1;
+  string common_name = 2;
+  string serial_number = 3;
+  string issuer_cn = 4;
+  string ca_id = 5;
+  CertificateStatus status = 6;
+  google.protobuf.Timestamp not_before = 7;
+  google.protobuf.Timestamp not_after = 8;
+  int32 days_remaining = 9;
+  Subject subject = 10;
+  repeated string san = 11;
+  KeyAlgorithm key_algorithm = 12;
+  int32 key_size = 13;
+  string signature_algorithm = 14;
+  repeated string tags = 15;
+  Metadata metadata = 16;
+  google.protobuf.Timestamp created_at = 17;
+  string created_by = 18;
+  google.protobuf.Timestamp updated_at = 19;
+  Revocation revocation = 20;
+}
+
+message CertificateWithKey {
+  Certificate certificate = 1;
+  string private_key = 2;
+}
+
+message Revocation {
+  google.protobuf.Timestamp revoked_at = 1;
+  RevocationReason reason = 2;
+  string revoked_by = 3;
+  string comment = 4;
+}
+
+message CertificateChain {
+  string subject = 1;
+  string issuer = 2;
+  string serial = 3;
+}
+
+message CertificateSummary {
+  int32 total = 1;
+  int32 active = 2;
+  int32 expiring = 3;
+  int32 expired = 4;
+  int32 revoked = 5;
+}
+
+// List
+message ListCertificatesRequest {
+  int32 page = 1;
+  int32 limit = 2;
+  CertificateStatus status = 3;
+  string search = 4;
+  repeated string tags = 5;
+  string ca_id = 6;
+  CertificateSortField sort_by = 7;
+  bool sort_desc = 8;
+
+  enum CertificateSortField {
+    CERTIFICATE_SORT_FIELD_UNSPECIFIED = 0;
+    CERTIFICATE_SORT_FIELD_CREATED_AT = 1;
+    CERTIFICATE_SORT_FIELD_EXPIRES_AT = 2;
+    CERTIFICATE_SORT_FIELD_COMMON_NAME = 3;
+  }
+}
+
+message ListCertificatesResponse {
+  repeated Certificate certificates = 1;
+  Pagination pagination = 2;
+  CertificateSummary summary = 3;
+}
+
+// Get
+message GetCertificateRequest {
+  string cert_id = 1;
+}
+
+// Issue
+message IssueCertificateRequest {
+  string ca_id = 1;
+  string csr = 2;
+  int32 validity_days = 3;
+  repeated string tags = 4;
+  Metadata metadata = 5;
+}
+
+// Generate
+message GenerateCertificateRequest {
+  string ca_id = 1;
+  Subject subject = 2;
+  repeated string san = 3;
+  KeyAlgorithm key_algorithm = 4;
+  int32 key_size = 5;
+  int32 validity_days = 6;
+  repeated string tags = 7;
+  Metadata metadata = 8;
+}
+
+// Renew
+message RenewCertificateRequest {
+  string cert_id = 1;
+  int32 validity_days = 2;
+  bool keep_private_key = 3;
+}
+
+// Revoke
+message RevokeCertificateRequest {
+  string cert_id = 1;
+  RevocationReason reason = 2;
+  string comment = 3;
+}
+
+// Delete
+message DeleteCertificateRequest {
+  string cert_id = 1;
+}
+
+// Download
+message DownloadCertificateRequest {
+  string cert_id = 1;
+  DownloadFormat format = 2;
+  bool include_chain = 3;
+  string password = 4; // For PKCS12
+}
+
+message DownloadCertificateResponse {
+  bytes data = 1;
+  string filename = 2;
+  string content_type = 3;
+}
+
+// Tags
+message UpdateCertificateTagsRequest {
+  string cert_id = 1;
+  repeated string tags = 2;
+}
+
+// Metadata
+message UpdateCertificateMetadataRequest {
+  string cert_id = 1;
+  Metadata metadata = 2;
+}
+
+// Bulk
+message BulkOperationRequest {
+  BulkOperation operation = 1;
+  repeated string cert_ids = 2;
+  BulkOperationParams params = 3;
+
+  enum BulkOperation {
+    BULK_OPERATION_UNSPECIFIED = 0;
+    BULK_OPERATION_ADD_TAG = 1;
+    BULK_OPERATION_REMOVE_TAG = 2;
+    BULK_OPERATION_UPDATE_METADATA = 3;
+    BULK_OPERATION_EXPORT = 4;
+    BULK_OPERATION_RENEW = 5;
+    BULK_OPERATION_REVOKE = 6;
+  }
+}
+
+message BulkOperationParams {
+  repeated string tags = 1;
+  Metadata metadata = 2;
+  int32 validity_days = 3;
+  RevocationReason revocation_reason = 4;
+}
+
+message BulkOperationResponse {
+  repeated BulkOperationResult results = 1;
+  int32 success_count = 2;
+  int32 failure_count = 3;
+}
+
+message BulkOperationResult {
+  string cert_id = 1;
+  bool success = 2;
+  string error = 3;
+}
+
+// Validate
+message ValidateCertificateRequest {
+  string certificate = 1;
+  bool check_revocation = 2;
+}
+
+message ValidateCertificateResponse {
+  bool valid = 1;
+  repeated string errors = 2;
+  repeated string warnings = 3;
+  Certificate certificate_info = 4;
+}
+
+// =============================================================================
+// CA SERVICE
+// =============================================================================
+
+service CAService {
+  rpc ListCAs(ListCAsRequest) returns (ListCAsResponse) {
+    option (google.api.http) = {
+      get: "/v1/cas"
+    };
+  }
+
+  rpc GetCA(GetCARequest) returns (CA) {
+    option (google.api.http) = {
+      get: "/v1/cas/{ca_id}"
+    };
+  }
+
+  rpc CreateCA(CreateCARequest) returns (CA) {
+    option (google.api.http) = {
+      post: "/v1/cas"
+      body: "*"
+    };
+  }
+
+  rpc CreateIntermediateCA(CreateIntermediateCARequest) returns (CA) {
+    option (google.api.http) = {
+      post: "/v1/cas/{parent_ca_id}/intermediate"
+      body: "*"
+    };
+  }
+
+  rpc ImportCA(ImportCARequest) returns (CA) {
+    option (google.api.http) = {
+      post: "/v1/cas/import"
+      body: "*"
+    };
+  }
+
+  rpc UpdateCAPolicies(UpdateCAPoliciesRequest) returns (CA) {
+    option (google.api.http) = {
+      patch: "/v1/cas/{ca_id}/policies"
+      body: "*"
+    };
+  }
+
+  rpc GetCAChain(GetCAChainRequest) returns (GetCAChainResponse) {
+    option (google.api.http) = {
+      get: "/v1/cas/{ca_id}/chain"
+    };
+  }
+
+  rpc DownloadCACertificate(DownloadCARequest) returns (DownloadCAResponse) {
+    option (google.api.http) = {
+      get: "/v1/cas/{ca_id}/download/certificate"
+    };
+  }
+
+  rpc DownloadCAPrivateKey(DownloadCARequest) returns (DownloadCAResponse) {
+    option (google.api.http) = {
+      get: "/v1/cas/{ca_id}/download/private-key"
+    };
+  }
+
+  rpc DownloadCABundle(DownloadCARequest) returns (DownloadCAResponse) {
+    option (google.api.http) = {
+      get: "/v1/cas/{ca_id}/download/bundle"
+    };
+  }
+
+  rpc DownloadCAChain(DownloadCARequest) returns (DownloadCAResponse) {
+    option (google.api.http) = {
+      get: "/v1/cas/{ca_id}/download/chain"
+    };
+  }
+
+  rpc GetCRL(GetCRLRequest) returns (GetCRLResponse) {
+    option (google.api.http) = {
+      get: "/v1/cas/{ca_id}/crl"
+    };
+  }
+
+  rpc GenerateCRL(GenerateCRLRequest) returns (GetCRLResponse) {
+    option (google.api.http) = {
+      post: "/v1/cas/{ca_id}/crl/generate"
+    };
+  }
+}
+
+message CA {
+  string ca_id = 1;
+  string name = 2;
+  CAType type = 3;
+  string parent_ca_id = 4;
+  CAStatus status = 5;
+  Subject subject = 6;
+  KeyAlgorithm key_algorithm = 7;
+  int32 key_size = 8;
+  string signature_algorithm = 9;
+  google.protobuf.Timestamp not_before = 10;
+  google.protobuf.Timestamp not_after = 11;
+  string serial_number = 12;
+  CAStatistics statistics = 13;
+  CAPolicies policies = 14;
+  google.protobuf.Timestamp created_at = 15;
+
+  enum CAType {
+    CA_TYPE_UNSPECIFIED = 0;
+    CA_TYPE_ROOT = 1;
+    CA_TYPE_INTERMEDIATE = 2;
+  }
+
+  enum CAStatus {
+    CA_STATUS_UNSPECIFIED = 0;
+    CA_STATUS_ACTIVE = 1;
+    CA_STATUS_INACTIVE = 2;
+  }
+}
+
+message CAStatistics {
+  int32 certificates_issued = 1;
+  int32 certificates_active = 2;
+  int32 certificates_revoked = 3;
+  int32 certificates_expired = 4;
+}
+
+message CAPolicies {
+  int32 default_validity_days = 1;
+  int32 max_validity_days = 2;
+  repeated KeyAlgorithm allowed_key_algorithms = 3;
+  int32 min_key_size_rsa = 4;
+  repeated string allowed_ec_curves = 5;
+  bool require_san = 6;
+  bool allow_wildcard = 7;
+}
+
+// List
+message ListCAsRequest {
+  int32 page = 1;
+  int32 limit = 2;
+}
+
+message ListCAsResponse {
+  repeated CA cas = 1;
+  Pagination pagination = 2;
+}
+
+// Get
+message GetCARequest {
+  string ca_id = 1;
+}
+
+// Create Root
+message CreateCARequest {
+  string name = 1;
+  Subject subject = 2;
+  KeyAlgorithm key_algorithm = 3;
+  int32 key_size = 4;
+  string signature_algorithm = 5;
+  int32 validity_days = 6;
+  CAPolicies policies = 7;
+}
+
+// Create Intermediate
+message CreateIntermediateCARequest {
+  string parent_ca_id = 1;
+  string name = 2;
+  Subject subject = 3;
+  KeyAlgorithm key_algorithm = 4;
+  int32 key_size = 5;
+  int32 validity_days = 6;
+  int32 path_length = 7;
+  CAPolicies policies = 8;
+}
+
+// Import
+message ImportCARequest {
+  string name = 1;
+  string certificate = 2;
+  string private_key = 3;
+  string private_key_password = 4;
+}
+
+// Update Policies
+message UpdateCAPoliciesRequest {
+  string ca_id = 1;
+  CAPolicies policies = 2;
+}
+
+// Chain
+message GetCAChainRequest {
+  string ca_id = 1;
+}
+
+message GetCAChainResponse {
+  repeated CertificateChain chain = 1;
+}
+
+// Download
+message DownloadCARequest {
+  string ca_id = 1;
+}
+
+message DownloadCAResponse {
+  bytes data = 1;
+  string filename = 2;
+  string content_type = 3;
+}
+
+// CRL
+message GetCRLRequest {
+  string ca_id = 1;
+}
+
+message GenerateCRLRequest {
+  string ca_id = 1;
+}
+
+message GetCRLResponse {
+  bytes crl = 1;
+  google.protobuf.Timestamp last_update = 2;
+  google.protobuf.Timestamp next_update = 3;
+}
+
+// =============================================================================
+// TEMPLATE SERVICE
+// =============================================================================
+
+service TemplateService {
+  rpc ListTemplates(ListTemplatesRequest) returns (ListTemplatesResponse) {
+    option (google.api.http) = {
+      get: "/v1/templates"
+    };
+  }
+
+  rpc GetTemplate(GetTemplateRequest) returns (Template) {
+    option (google.api.http) = {
+      get: "/v1/templates/{template_id}"
+    };
+  }
+
+  rpc CreateTemplate(CreateTemplateRequest) returns (Template) {
+    option (google.api.http) = {
+      post: "/v1/templates"
+      body: "*"
+    };
+  }
+
+  rpc UpdateTemplate(UpdateTemplateRequest) returns (Template) {
+    option (google.api.http) = {
+      patch: "/v1/templates/{template_id}"
+      body: "*"
+    };
+  }
+
+  rpc DeleteTemplate(DeleteTemplateRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/templates/{template_id}"
+    };
+  }
+}
+
+message Template {
+  string template_id = 1;
+  string name = 2;
+  string description = 3;
+  string ca_id = 4;
+  SubjectTemplate subject_template = 5;
+  KeyAlgorithm key_algorithm = 6;
+  int32 key_size = 7;
+  int32 validity_days = 8;
+  repeated string key_usage = 9;
+  repeated string extended_key_usage = 10;
+  repeated string tags = 11;
+  google.protobuf.Timestamp created_at = 12;
+  google.protobuf.Timestamp updated_at = 13;
+}
+
+message SubjectTemplate {
+  string organization = 1;
+  string organizational_unit = 2;
+  string country = 3;
+}
+
+message ListTemplatesRequest {
+  int32 page = 1;
+  int32 limit = 2;
+}
+
+message ListTemplatesResponse {
+  repeated Template templates = 1;
+  Pagination pagination = 2;
+}
+
+message GetTemplateRequest {
+  string template_id = 1;
+}
+
+message CreateTemplateRequest {
+  string name = 1;
+  string description = 2;
+  string ca_id = 3;
+  SubjectTemplate subject_template = 4;
+  KeyAlgorithm key_algorithm = 5;
+  int32 key_size = 6;
+  int32 validity_days = 7;
+  repeated string key_usage = 8;
+  repeated string extended_key_usage = 9;
+  repeated string tags = 10;
+}
+
+message UpdateTemplateRequest {
+  string template_id = 1;
+  string name = 2;
+  string description = 3;
+  int32 validity_days = 4;
+  repeated string tags = 5;
+}
+
+message DeleteTemplateRequest {
+  string template_id = 1;
+}
+
+// =============================================================================
+// AUDIT SERVICE
+// =============================================================================
+
+service AuditService {
+  rpc GetAuditLogs(GetAuditLogsRequest) returns (GetAuditLogsResponse) {
+    option (google.api.http) = {
+      get: "/v1/audit/logs"
+    };
+  }
+}
+
+message AuditLog {
+  string log_id = 1;
+  string tenant_id = 2;
+  string user_id = 3;
+  string user_email = 4;
+  AuditAction action = 5;
+  string resource_type = 6;
+  string resource_id = 7;
+  map<string, string> details = 8;
+  string ip_address = 9;
+  string user_agent = 10;
+  google.protobuf.Timestamp timestamp = 11;
+
+  enum AuditAction {
+    AUDIT_ACTION_UNSPECIFIED = 0;
+    AUDIT_ACTION_CERTIFICATE_ISSUED = 1;
+    AUDIT_ACTION_CERTIFICATE_RENEWED = 2;
+    AUDIT_ACTION_CERTIFICATE_REVOKED = 3;
+    AUDIT_ACTION_CA_CREATED = 4;
+    AUDIT_ACTION_USER_LOGIN = 5;
+    AUDIT_ACTION_USER_LOGOUT = 6;
+    AUDIT_ACTION_SETTINGS_UPDATED = 7;
+  }
+}
+
+message GetAuditLogsRequest {
+  int32 page = 1;
+  int32 limit = 2;
+  AuditLog.AuditAction action = 3;
+  string user_id = 4;
+  google.protobuf.Timestamp from = 5;
+  google.protobuf.Timestamp to = 6;
+}
+
+message GetAuditLogsResponse {
+  repeated AuditLog logs = 1;
+  Pagination pagination = 2;
+}
+
+// =============================================================================
+// WEBHOOK SERVICE
+// =============================================================================
+
+service WebhookService {
+  rpc ListWebhooks(ListWebhooksRequest) returns (ListWebhooksResponse) {
+    option (google.api.http) = {
+      get: "/v1/webhooks"
+    };
+  }
+
+  rpc CreateWebhook(CreateWebhookRequest) returns (Webhook) {
+    option (google.api.http) = {
+      post: "/v1/webhooks"
+      body: "*"
+    };
+  }
+
+  rpc DeleteWebhook(DeleteWebhookRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/webhooks/{webhook_id}"
+    };
+  }
+}
+
+message Webhook {
+  string webhook_id = 1;
+  string url = 2;
+  repeated string events = 3;
+  bool active = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp last_triggered_at = 6;
+}
+
+message ListWebhooksRequest {
+  int32 page = 1;
+  int32 limit = 2;
+}
+
+message ListWebhooksResponse {
+  repeated Webhook webhooks = 1;
+  Pagination pagination = 2;
+}
+
+message CreateWebhookRequest {
+  string url = 1;
+  repeated string events = 2;
+  string secret = 3;
+}
+
+message DeleteWebhookRequest {
+  string webhook_id = 1;
+}
+
+// =============================================================================
+// HEALTH SERVICE
+// =============================================================================
+
+service HealthService {
+  rpc Check(google.protobuf.Empty) returns (HealthCheckResponse) {
+    option (google.api.http) = {
+      get: "/v1/health"
+    };
+  }
+
+  rpc Ready(google.protobuf.Empty) returns (ReadinessCheckResponse) {
+    option (google.api.http) = {
+      get: "/v1/health/ready"
+    };
+  }
+}
+
+message HealthCheckResponse {
+  string status = 1;
+  string version = 2;
+}
+
+message ReadinessCheckResponse {
+  bool ready = 1;
+  map<string, bool> checks = 2;
+}
+
+// =============================================================================
+// OCSP SERVICE
+// =============================================================================
+
+service OCSPService {
+  rpc Query(OCSPRequest) returns (OCSPResponse) {
+    option (google.api.http) = {
+      post: "/v1/ocsp"
+      body: "*"
+    };
+  }
+}
+
+message OCSPRequest {
+  bytes request = 1;
+}
+
+message OCSPResponse {
+  bytes response = 1;
+}

@@ -1,15 +1,12 @@
-module github.com/myorg/grpc-web-demo
+module github.com/vinodhalaharvi/grpc-web-template
 
 go 1.25
 
 require (
-	google.golang.org/grpc v1.70.0
-	google.golang.org/protobuf v1.36.4
+	connectrpc.com/connect v1.19.1
+	golang.org/x/net v0.38.0
+	google.golang.org/genproto/googleapis/api v0.0.0-20251029180050-ab9386a59fda
+	google.golang.org/protobuf v1.36.11
 )
 
-require (
-	golang.org/x/net v0.32.0 // indirect
-	golang.org/x/sys v0.28.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20241202173237-19429a94021a // indirect
-)
+require golang.org/x/text v0.23.0 // indirect

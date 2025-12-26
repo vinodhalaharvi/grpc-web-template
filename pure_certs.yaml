@@ -1,0 +1,2594 @@
+openapi: 3.0.3
+info:
+  title: MTKS Certificate Authority API
+  description: |
+    Multi-tenant Certificate Authority REST API for managing SSL/TLS certificates.
+    
+    ## Features
+    - Multi-tenant architecture with complete isolation
+    - Full certificate lifecycle management (issue, renew, revoke)
+    - Support for Root and Intermediate CAs
+    - CRL and OCSP support
+    - Tags and metadata for organization
+    - Audit logging and webhooks
+    - Bulk operations
+    
+    ## Authentication
+    All endpoints (except auth and public CRL/OCSP) require JWT Bearer token authentication.
+    
+    ## Rate Limiting
+    - 100 requests per minute for authenticated users
+    - 10 requests per minute for unauthenticated endpoints
+
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@mtks-ca.com
+    url: https://docs.mtks-ca.com
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+
+servers:
+  - url: https://api.mtks-ca.com/v1
+    description: Production server
+  - url: https://staging-api.mtks-ca.com/v1
+    description: Staging server
+  - url: http://localhost:8080/v1
+    description: Local development server
+
+tags:
+  - name: Authentication
+    description: User authentication and authorization
+  - name: Tenants
+    description: Tenant management and settings
+  - name: Certificates
+    description: Certificate lifecycle management
+  - name: Certificate Authorities
+    description: CA configuration and management
+  - name: Revocation
+    description: Certificate revocation and CRL
+  - name: Templates
+    description: Certificate templates
+  - name: Audit
+    description: Audit logs and activity tracking
+  - name: Webhooks
+    description: Webhook configuration and management
+  - name: Health
+    description: API health and status
+
+paths:
+  # ==================== AUTHENTICATION ====================
+  /auth/register:
+    post:
+      tags:
+        - Authentication
+      summary: Register new user
+      description: Create a new user account and tenant
+      operationId: registerUser
+      security: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Email already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: User login
+      description: Authenticate user and receive JWT tokens
+      operationId: loginUser
+      security: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/refresh:
+    post:
+      tags:
+        - Authentication
+      summary: Refresh access token
+      description: Get new access token using refresh token
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refresh_token
+              properties:
+                refresh_token:
+                  type: string
+                  example: eyJhbGciOiJIUzI1NiIs...
+      responses:
+        '200':
+          description: Token refreshed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/logout:
+    post:
+      tags:
+        - Authentication
+      summary: Logout user
+      description: Invalidate current tokens
+      operationId: logoutUser
+      security:
+        - bearerAuth: [ ]
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Successfully logged out
+
+  /auth/me:
+    get:
+      tags:
+        - Authentication
+      summary: Get current user
+      description: Get authenticated user information
+      operationId: getCurrentUser
+      security:
+        - bearerAuth: [ ]
+      responses:
+        '200':
+          description: User information retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ==================== TENANTS ====================
+  /tenants/{tenant_id}:
+    get:
+      tags:
+        - Tenants
+      summary: Get tenant information
+      description: Retrieve tenant details and settings
+      operationId: getTenant
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      responses:
+        '200':
+          description: Tenant information retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    
+    patch:
+      tags:
+        - Tenants
+      summary: Update tenant settings
+      description: Update tenant configuration
+      operationId: updateTenant
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantUpdate'
+      responses:
+        '200':
+          description: Tenant updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+
+  /tenants/{tenant_id}/users:
+    get:
+      tags:
+        - Tenants
+      summary: List tenant users
+      description: Get all users in the tenant
+      operationId: listTenantUsers
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - name: role
+          in: query
+          description: Filter by role
+          schema:
+            type: string
+            enum: [ admin, operator, viewer ]
+      responses:
+        '200':
+          description: Users retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  /tenants/{tenant_id}/users/invite:
+    post:
+      tags:
+        - Tenants
+      summary: Invite user to tenant
+      description: Send invitation to new user
+      operationId: inviteUser
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InviteUserRequest'
+      responses:
+        '201':
+          description: Invitation sent successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitationResponse'
+
+  # ==================== CERTIFICATES ====================
+  /certificates:
+    get:
+      tags:
+        - Certificates
+      summary: List certificates
+      description: Get all certificates for the tenant with filtering and sorting
+      operationId: listCertificates
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - name: status
+          in: query
+          description: Filter by certificate status
+          schema:
+            type: string
+            enum: [ active, expiring, expired, revoked ]
+        - name: search
+          in: query
+          description: Search in CN, serial, tags
+          schema:
+            type: string
+        - name: tag
+          in: query
+          description: Filter by tags (can specify multiple)
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+        - name: ca_id
+          in: query
+          description: Filter by CA ID
+          schema:
+            type: string
+        - name: sort
+          in: query
+          description: Sort field (prefix with - for descending)
+          schema:
+            type: string
+            enum: [ created_at, -created_at, expires_at, -expires_at, cn, -cn ]
+            default: -created_at
+      responses:
+        '200':
+          description: Certificates retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  certificates:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Certificate'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+                  summary:
+                    $ref: '#/components/schemas/CertificateSummary'
+
+  /certificates/issue:
+    post:
+      tags:
+        - Certificates
+      summary: Issue certificate from CSR
+      description: Issue a new certificate from a Certificate Signing Request
+      operationId: issueCertificate
+      security:
+        - bearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssueCertificateRequest'
+      responses:
+        '201':
+          description: Certificate issued successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IssueCertificateResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /certificates/generate:
+    post:
+      tags:
+        - Certificates
+      summary: Generate and issue certificate
+      description: Generate private key, CSR, and issue certificate in one operation
+      operationId: generateCertificate
+      security:
+        - bearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateCertificateRequest'
+      responses:
+        '201':
+          description: Certificate generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateCertificateResponse'
+
+  /certificates/{cert_id}:
+    get:
+      tags:
+        - Certificates
+      summary: Get certificate details
+      description: Retrieve detailed information about a certificate
+      operationId: getCertificate
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - $ref: '#/components/parameters/CertificateId'
+      responses:
+        '200':
+          description: Certificate details retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CertificateDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    
+    delete:
+      tags:
+        - Certificates
+      summary: Delete certificate
+      description: Delete certificate record (does not revoke)
+      operationId: deleteCertificate
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - $ref: '#/components/parameters/CertificateId'
+      responses:
+        '204':
+          description: Certificate deleted successfully
+
+  /certificates/{cert_id}/renew:
+    post:
+      tags:
+        - Certificates
+      summary: Renew certificate
+      description: Renew an existing certificate
+      operationId: renewCertificate
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - $ref: '#/components/parameters/CertificateId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenewCertificateRequest'
+      responses:
+        '201':
+          description: Certificate renewed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RenewCertificateResponse'
+
+  /certificates/{cert_id}/revoke:
+    post:
+      tags:
+        - Certificates
+      summary: Revoke certificate
+      description: Revoke a certificate with reason
+      operationId: revokeCertificate
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - $ref: '#/components/parameters/CertificateId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevokeCertificateRequest'
+      responses:
+        '200':
+          description: Certificate revoked successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevokeCertificateResponse'
+
+  /certificates/{cert_id}/download:
+    get:
+      tags:
+        - Certificates
+      summary: Download certificate
+      description: Download certificate in various formats
+      operationId: downloadCertificate
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - $ref: '#/components/parameters/CertificateId'
+        - name: format
+          in: query
+          description: Certificate format
+          schema:
+            type: string
+            enum: [ pem, der, pkcs12, pkcs7 ]
+            default: pem
+        - name: include_chain
+          in: query
+          description: Include certificate chain
+          schema:
+            type: boolean
+            default: true
+        - name: password
+          in: query
+          description: Password for PKCS12 format
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Certificate file
+          content:
+            application/x-pem-file:
+              schema:
+                type: string
+                format: binary
+            application/pkix-cert:
+              schema:
+                type: string
+                format: binary
+            application/x-pkcs12:
+              schema:
+                type: string
+                format: binary
+
+  /certificates/{cert_id}/tags:
+    patch:
+      tags:
+        - Certificates
+      summary: Update certificate tags
+      description: Update tags for a certificate
+      operationId: updateCertificateTags
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - $ref: '#/components/parameters/CertificateId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - tags
+              properties:
+                tags:
+                  type: array
+                  items:
+                    type: string
+                  example: [ production, critical, api ]
+      responses:
+        '200':
+          description: Tags updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cert_id:
+                    type: string
+                  tags:
+                    type: array
+                    items:
+                      type: string
+                  updated_at:
+                    type: string
+                    format: date-time
+
+  /certificates/{cert_id}/metadata:
+    patch:
+      tags:
+        - Certificates
+      summary: Update certificate metadata
+      description: Update custom metadata for a certificate
+      operationId: updateCertificateMetadata
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - $ref: '#/components/parameters/CertificateId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - metadata
+              properties:
+                metadata:
+                  type: object
+                  additionalProperties: true
+                  example:
+                    environment: production
+                    owner: platform-team
+                    cost_center: engineering
+      responses:
+        '200':
+          description: Metadata updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cert_id:
+                    type: string
+                  metadata:
+                    type: object
+                    additionalProperties: true
+                  updated_at:
+                    type: string
+                    format: date-time
+
+  /certificates/bulk:
+    post:
+      tags:
+        - Certificates
+      summary: Bulk certificate operations
+      description: Perform operations on multiple certificates
+      operationId: bulkCertificateOperation
+      security:
+        - bearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkOperationRequest'
+      responses:
+        '200':
+          description: Bulk operation completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkOperationResponse'
+
+  /certificates/validate:
+    post:
+      tags:
+        - Certificates
+      summary: Validate certificate
+      description: Validate certificate chain and revocation status
+      operationId: validateCertificate
+      security:
+        - bearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - certificate
+              properties:
+                certificate:
+                  type: string
+                  description: PEM-encoded certificate
+                check_revocation:
+                  type: boolean
+                  default: true
+      responses:
+        '200':
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationResult'
+
+  # ==================== CERTIFICATE AUTHORITIES ====================
+  /cas:
+    get:
+      tags:
+        - Certificate Authorities
+      summary: List CAs
+      description: Get all Certificate Authorities for the tenant
+      operationId: listCAs
+      security:
+        - bearerAuth: [ ]
+      responses:
+        '200':
+          description: CAs retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cas:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CA'
+    
+    post:
+      tags:
+        - Certificate Authorities
+      summary: Create CA
+      description: Create a new Certificate Authority
+      operationId: createCA
+      security:
+        - bearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCARequest'
+      responses:
+        '201':
+          description: CA created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCAResponse'
+
+  /cas/import:
+    post:
+      tags:
+        - Certificate Authorities
+      summary: Import existing CA
+      description: |
+        Import an existing CA certificate and private key (Bring Your Own CA).
+        Useful for:
+        - Migrating from other PKI systems
+        - Using existing trusted CAs
+        - Disaster recovery
+        - Multi-tool certificate management
+      operationId: importCA
+      security:
+        - bearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportCARequest'
+      responses:
+        '201':
+          description: CA imported successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportCAResponse'
+        '400':
+          description: Invalid certificate or private key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                invalid_certificate:
+                  value:
+                    error: invalid_request
+                    message: Invalid certificate format
+                key_mismatch:
+                  value:
+                    error: validation_error
+                    message: Private key does not match certificate
+                not_ca:
+                  value:
+                    error: validation_error
+                    message: Certificate is not a CA certificate (missing CA:TRUE)
+                expired:
+                  value:
+                    error: validation_error
+                    message: Certificate has expired
+        '403':
+          description: Insufficient permissions (admin only)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: CA with this serial number already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /cas/{ca_id}:
+    get:
+      tags:
+        - Certificate Authorities
+      summary: Get CA details
+      description: Retrieve detailed CA information including certificate and private key
+      operationId: getCA
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - $ref: '#/components/parameters/CAId'
+      responses:
+        '200':
+          description: CA details retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CADetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /cas/{ca_id}/intermediate:
+    post:
+      tags:
+        - Certificate Authorities
+      summary: Create intermediate CA
+      description: Create intermediate CA signed by parent
+      operationId: createIntermediateCA
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - $ref: '#/components/parameters/CAId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIntermediateCARequest'
+      responses:
+        '201':
+          description: Intermediate CA created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCAResponse'
+
+  /cas/{ca_id}/parent:
+                patch:
+                  tags:
+                    - Certificate Authorities
+                  summary: Update CA parent relationship
+                  description: |
+                    Change the parent of an existing CA. Useful for reorganizing CA hierarchy.
+                    Note: This updates the parent_ca_id reference but does not re-sign the certificate.
+                    For a proper PKI chain, use the reissue endpoint instead.
+                  operationId: updateCAParent
+                  security:
+                    - bearerAuth: [ ]
+                  parameters:
+                    - $ref: '#/components/parameters/CAId'
+                  requestBody:
+                    required: true
+                    content:
+                      application/json:
+                        schema:
+                          type: object
+                          required:
+                            - parent_ca_id
+                          properties:
+                            parent_ca_id:
+                              type: string
+                              nullable: true
+                              description: ID of new parent CA (null to make root CA)
+                              example: "ca_root_001"
+                  responses:
+                    '200':
+                      description: Parent relationship updated
+                      content:
+                        application/json:
+                          schema:
+                            type: object
+                            properties:
+                              ca_id:
+                                type: string
+                              name:
+                                type: string
+                              type:
+                                type: string
+                                enum: [ root, intermediate ]
+                              parent_ca_id:
+                                type: string
+                                nullable: true
+                              updated_at:
+                                type: string
+                                format: date-time
+                              message:
+                                type: string
+                    '400':
+                      description: Invalid request (circular reference, etc.)
+                      content:
+                        application/json:
+                          schema:
+                            $ref: '#/components/schemas/Error'
+                    '404':
+                      $ref: '#/components/responses/NotFound'
+
+  /cas/{ca_id}/policies:
+    patch:
+      tags:
+        - Certificate Authorities
+      summary: Update CA policies
+      description: Update CA issuance policies
+      operationId: updateCAPolicies
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - $ref: '#/components/parameters/CAId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - policies
+              properties:
+                policies:
+                  $ref: '#/components/schemas/CAPolicies'
+      responses:
+        '200':
+          description: Policies updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ca_id:
+                    type: string
+                  policies:
+                    $ref: '#/components/schemas/CAPolicies'
+                  updated_at:
+                    type: string
+                    format: date-time
+
+  /cas/{ca_id}/chain:
+    get:
+      tags:
+        - Certificate Authorities
+      summary: Get CA certificate chain
+      description: Get complete CA certificate chain as JSON
+      operationId: getCAChain
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - $ref: '#/components/parameters/CAId'
+      responses:
+        '200':
+          description: Certificate chain retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  chain:
+                    type: array
+                    description: Array of PEM-encoded certificates from leaf to root
+                    items:
+                      type: string
+                      example: "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /cas/{ca_id}/download/certificate:
+    get:
+      tags:
+        - Certificate Authorities
+      summary: Download CA certificate
+      description: Download the CA certificate in PEM format
+      operationId: downloadCACertificate
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - $ref: '#/components/parameters/CAId'
+      responses:
+        '200':
+          description: Certificate file
+          content:
+            application/x-pem-file:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: attachment; filename="ca-certificate.crt"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /cas/{ca_id}/download/private-key:
+    get:
+      tags:
+        - Certificate Authorities
+      summary: Download CA private key
+      description: |
+        Download the CA private key in PEM format.
+        **WARNING:** This is a sensitive operation. Only admins can access.
+        All downloads are audited.
+      operationId: downloadCAPrivateKey
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - $ref: '#/components/parameters/CAId'
+      responses:
+        '200':
+          description: Private key file
+          content:
+            application/x-pem-file:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: attachment; filename="ca-private-key.key"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '403':
+          description: Insufficient permissions (admin only)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /cas/{ca_id}/download/bundle:
+    get:
+      tags:
+        - Certificate Authorities
+      summary: Download CA bundle
+      description: |
+        Download CA certificate and private key in a single PEM file.
+        **WARNING:** This is a sensitive operation. Only admins can access.
+        All downloads are audited.
+      operationId: downloadCABundle
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - $ref: '#/components/parameters/CAId'
+      responses:
+        '200':
+          description: Bundle file (certificate + private key)
+          content:
+            application/x-pem-file:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: attachment; filename="ca-bundle.pem"
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '403':
+          description: Insufficient permissions (admin only)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /cas/{ca_id}/download/chain:
+    get:
+      tags:
+        - Certificate Authorities
+      summary: Download CA certificate chain
+      description: Download the complete certificate chain as a PEM file
+      operationId: downloadCAChain
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - $ref: '#/components/parameters/CAId'
+      responses:
+        '200':
+          description: Certificate chain file
+          content:
+            application/x-pem-file:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: attachment; filename="ca-chain.pem"
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ==================== REVOCATION ====================
+  /cas/{ca_id}/crl:
+    get:
+      tags:
+        - Revocation
+      summary: Get CRL
+      description: Download Certificate Revocation List (public endpoint)
+      operationId: getCRL
+      security: [ ]
+      parameters:
+        - $ref: '#/components/parameters/CAId'
+      responses:
+        '200':
+          description: CRL file
+          content:
+            application/pkix-crl:
+              schema:
+                type: string
+                format: binary
+
+  /cas/{ca_id}/crl/generate:
+    post:
+      tags:
+        - Revocation
+      summary: Generate new CRL
+      description: Force generation of new CRL
+      operationId: generateCRL
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - $ref: '#/components/parameters/CAId'
+      responses:
+        '200':
+          description: CRL generated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ca_id:
+                    type: string
+                  crl_number:
+                    type: integer
+                  next_update:
+                    type: string
+                    format: date-time
+                  revoked_certificates:
+                    type: integer
+
+  /ocsp:
+    post:
+      tags:
+        - Revocation
+      summary: OCSP request
+      description: Online Certificate Status Protocol request (public endpoint)
+      operationId: ocspRequest
+      security: [ ]
+      requestBody:
+        required: true
+        content:
+          application/ocsp-request:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: OCSP response
+          content:
+            application/ocsp-response:
+              schema:
+                type: string
+                format: binary
+
+  # ==================== TEMPLATES ====================
+  /templates:
+    get:
+      tags:
+        - Templates
+      summary: List certificate templates
+      description: Get all certificate templates
+      operationId: listTemplates
+      security:
+        - bearerAuth: [ ]
+      responses:
+        '200':
+          description: Templates retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  templates:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Template'
+
+    post:
+      tags:
+        - Templates
+      summary: Create template
+      description: Create a new certificate template
+      operationId: createTemplate
+      security:
+        - bearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTemplateRequest'
+      responses:
+        '201':
+          description: Template created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+
+  /templates/{template_id}:
+    get:
+      tags:
+        - Templates
+      summary: Get template
+      description: Retrieve template details
+      operationId: getTemplate
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - name: template_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Template retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+
+    patch:
+      tags:
+        - Templates
+      summary: Update template
+      description: Update template configuration
+      operationId: updateTemplate
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - name: template_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTemplateRequest'
+      responses:
+        '200':
+          description: Template updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Template'
+
+    delete:
+      tags:
+        - Templates
+      summary: Delete template
+      description: Delete a certificate template
+      operationId: deleteTemplate
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - name: template_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Template deleted successfully
+
+  # ==================== AUDIT ====================
+  /audit/logs:
+    get:
+      tags:
+        - Audit
+      summary: Get audit logs
+      description: Retrieve audit logs with filtering
+      operationId: getAuditLogs
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+        - name: action
+          in: query
+          description: Filter by action type
+          schema:
+            type: string
+            enum: [ certificate.issued, certificate.renewed, certificate.revoked, ca.created, user.login ]
+        - name: user_id
+          in: query
+          description: Filter by user ID
+          schema:
+            type: string
+        - name: from
+          in: query
+          description: Start date (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: End date (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Audit logs retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditLog'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+
+  # ==================== WEBHOOKS ====================
+  /webhooks:
+    get:
+      tags:
+        - Webhooks
+      summary: List webhooks
+      description: Get all configured webhooks
+      operationId: listWebhooks
+      security:
+        - bearerAuth: [ ]
+      responses:
+        '200':
+          description: Webhooks retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  webhooks:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Webhook'
+
+    post:
+      tags:
+        - Webhooks
+      summary: Create webhook
+      description: Configure a new webhook endpoint
+      operationId: createWebhook
+      security:
+        - bearerAuth: [ ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWebhookRequest'
+      responses:
+        '201':
+          description: Webhook created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Webhook'
+
+  /webhooks/{webhook_id}:
+    delete:
+      tags:
+        - Webhooks
+      summary: Delete webhook
+      description: Remove webhook configuration
+      operationId: deleteWebhook
+      security:
+        - bearerAuth: [ ]
+      parameters:
+        - name: webhook_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Webhook deleted successfully
+
+  # ==================== HEALTH ====================
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: API health status
+      operationId: healthCheck
+      security: [ ]
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+                  version:
+                    type: string
+                    example: 1.0.0
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /health/ready:
+    get:
+      tags:
+        - Health
+      summary: Readiness check
+      description: Check if API is ready to serve requests
+      operationId: readinessCheck
+      security: [ ]
+      responses:
+        '200':
+          description: API is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ready:
+                    type: boolean
+                    example: true
+                  checks:
+                    type: object
+                    properties:
+                      database:
+                        type: string
+                        example: ok
+                      ca_service:
+                        type: string
+                        example: ok
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from /auth/login
+
+  parameters:
+    TenantId:
+      name: tenant_id
+      in: path
+      required: true
+      description: Tenant identifier
+      schema:
+        type: string
+        example: tnt_xyz789
+
+    CertificateId:
+      name: cert_id
+      in: path
+      required: true
+      description: Certificate identifier
+      schema:
+        type: string
+        example: crt_001
+
+    CAId:
+      name: ca_id
+      in: path
+      required: true
+      description: CA identifier
+      schema:
+        type: string
+        example: ca_prod_001
+
+    Page:
+      name: page
+      in: query
+      description: Page number (starting from 1)
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+
+    Limit:
+      name: limit
+      in: query
+      description: Number of items per page
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    # ==================== AUTH SCHEMAS ====================
+    RegisterRequest:
+      type: object
+      required:
+        - email
+        - password
+        - first_name
+        - last_name
+      properties:
+        email:
+          type: string
+          format: email
+          example: user@example.com
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: SecurePass123!
+        first_name:
+          type: string
+          example: John
+        last_name:
+          type: string
+          example: Doe
+        company:
+          type: string
+          example: Example Corp
+
+    RegisterResponse:
+      type: object
+      properties:
+        user_id:
+          type: string
+          example: usr_abc123
+        email:
+          type: string
+          example: user@example.com
+        tenant_id:
+          type: string
+          example: tnt_xyz789
+        tenant_name:
+          type: string
+          example: Example Corp
+        created_at:
+          type: string
+          format: date-time
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: user@example.com
+        password:
+          type: string
+          format: password
+          example: SecurePass123!
+
+    LoginResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          example: eyJhbGciOiJIUzI1NiIs...
+        refresh_token:
+          type: string
+          example: eyJhbGciOiJIUzI1NiIs...
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+          example: 3600
+        user:
+          $ref: '#/components/schemas/User'
+
+    RefreshResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        expires_in:
+          type: integer
+
+    # ==================== USER SCHEMAS ====================
+    User:
+      type: object
+      properties:
+        user_id:
+          type: string
+          example: usr_abc123
+        email:
+          type: string
+          example: user@example.com
+        first_name:
+          type: string
+          example: John
+        last_name:
+          type: string
+          example: Doe
+        tenant_id:
+          type: string
+          example: tnt_xyz789
+        tenant_name:
+          type: string
+          example: Example Corp
+        role:
+          type: string
+          enum: [ admin, operator, viewer ]
+          example: admin
+        permissions:
+          type: array
+          items:
+            type: string
+          example: [ certs:read, certs:write, certs:revoke ]
+        status:
+          type: string
+          enum: [ active, inactive, pending ]
+          example: active
+        last_login:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    # ==================== TENANT SCHEMAS ====================
+    Tenant:
+      type: object
+      properties:
+        tenant_id:
+          type: string
+          example: tnt_xyz789
+        name:
+          type: string
+          example: Example Corp
+        domain:
+          type: string
+          example: example.com
+        plan:
+          type: string
+          enum: [ starter, professional, enterprise ]
+          example: enterprise
+        status:
+          type: string
+          enum: [ active, suspended, trial ]
+          example: active
+        settings:
+          type: object
+          properties:
+            default_ca:
+              type: string
+            default_validity_days:
+              type: integer
+            auto_renewal:
+              type: boolean
+            notification_email:
+              type: string
+              format: email
+        limits:
+          type: object
+          properties:
+            max_certificates:
+              type: integer
+            current_certificates:
+              type: integer
+            max_cas:
+              type: integer
+            current_cas:
+              type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    TenantUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        settings:
+          type: object
+          additionalProperties: true
+
+    InviteUserRequest:
+      type: object
+      required:
+        - email
+        - role
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [ admin, operator, viewer ]
+        permissions:
+          type: array
+          items:
+            type: string
+
+    InvitationResponse:
+      type: object
+      properties:
+        invitation_id:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        invitation_link:
+          type: string
+
+    # ==================== CERTIFICATE SCHEMAS ====================
+    Certificate:
+      type: object
+      properties:
+        cert_id:
+          type: string
+          example: crt_001
+        common_name:
+          type: string
+          example: api.example.com
+        serial_number:
+          type: string
+          example: "0a:1b:2c:3d:4e:5f"
+        issuer_cn:
+          type: string
+          example: Example Corp Root CA
+        ca_id:
+          type: string
+          example: ca_prod_001
+        status:
+          type: string
+          enum: [ active, expiring, expired, revoked ]
+          example: active
+        not_before:
+          type: string
+          format: date-time
+        not_after:
+          type: string
+          format: date-time
+        days_remaining:
+          type: integer
+          example: 365
+        subject:
+          $ref: '#/components/schemas/Subject'
+        san:
+          type: array
+          items:
+            type: string
+          example: [ api.example.com, www.api.example.com ]
+        key_algorithm:
+          type: string
+          enum: [ RSA, ECDSA, Ed25519 ]
+          example: ECDSA
+        key_size:
+          type: integer
+          example: 384
+        signature_algorithm:
+          type: string
+          example: SHA384withECDSA
+        tags:
+          type: array
+          items:
+            type: string
+          example: [ production, critical ]
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+
+    CertificateDetail:
+      allOf:
+        - $ref: '#/components/schemas/Certificate'
+        - type: object
+          properties:
+            key_usage:
+              type: array
+              items:
+                type: string
+              example: [ digitalSignature, keyEncipherment ]
+            extended_key_usage:
+              type: array
+              items:
+                type: string
+              example: [ serverAuth, clientAuth ]
+            fingerprint_sha1:
+              type: string
+            fingerprint_sha256:
+              type: string
+            certificate_chain:
+              type: array
+              items:
+                type: object
+                properties:
+                  subject:
+                    type: string
+                  issuer:
+                    type: string
+                  serial:
+                    type: string
+            revocation:
+              type: object
+              nullable: true
+              properties:
+                revoked_at:
+                  type: string
+                  format: date-time
+                reason:
+                  type: string
+                revoked_by:
+                  type: string
+
+    Subject:
+      type: object
+      required:
+        - common_name
+      properties:
+        common_name:
+          type: string
+          example: api.example.com
+        organization:
+          type: string
+          example: Example Corp
+        organizational_unit:
+          type: string
+          example: Engineering
+        country:
+          type: string
+          example: US
+        state:
+          type: string
+          example: California
+        locality:
+          type: string
+          example: San Francisco
+
+    IssueCertificateRequest:
+      type: object
+      required:
+        - ca_id
+        - csr
+      properties:
+        ca_id:
+          type: string
+        csr:
+          type: string
+          description: PEM-encoded Certificate Signing Request
+        validity_days:
+          type: integer
+          default: 365
+        tags:
+          type: array
+          items:
+            type: string
+        metadata:
+          type: object
+          additionalProperties: true
+
+    IssueCertificateResponse:
+      type: object
+      properties:
+        cert_id:
+          type: string
+        common_name:
+          type: string
+        serial_number:
+          type: string
+        status:
+          type: string
+        not_after:
+          type: string
+          format: date-time
+        certificate:
+          type: string
+          description: PEM-encoded certificate
+        certificate_chain:
+          type: string
+          description: PEM-encoded certificate chain
+        created_at:
+          type: string
+          format: date-time
+
+    GenerateCertificateRequest:
+      type: object
+      required:
+        - ca_id
+        - subject
+      properties:
+        ca_id:
+          type: string
+        subject:
+          $ref: '#/components/schemas/Subject'
+        san:
+          type: array
+          items:
+            type: string
+        key_algorithm:
+          type: string
+          enum: [ RSA, ECDSA, Ed25519 ]
+          default: ECDSA
+        key_size:
+          type: integer
+          description: RSA key size or EC curve size
+          default: 384
+        validity_days:
+          type: integer
+          default: 365
+        tags:
+          type: array
+          items:
+            type: string
+        metadata:
+          type: object
+          additionalProperties: true
+
+    GenerateCertificateResponse:
+      allOf:
+        - $ref: '#/components/schemas/IssueCertificateResponse'
+        - type: object
+          properties:
+            private_key:
+              type: string
+              description: PEM-encoded private key (shown only once)
+            warning:
+              type: string
+              example: Private key shown only once. Store securely.
+
+    RenewCertificateRequest:
+      type: object
+      properties:
+        validity_days:
+          type: integer
+          default: 365
+        keep_private_key:
+          type: boolean
+          default: true
+          description: Reuse existing private key
+
+    RenewCertificateResponse:
+      type: object
+      properties:
+        new_cert_id:
+          type: string
+        old_cert_id:
+          type: string
+        common_name:
+          type: string
+        serial_number:
+          type: string
+        status:
+          type: string
+        not_after:
+          type: string
+          format: date-time
+        certificate:
+          type: string
+        private_key:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    RevokeCertificateRequest:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+          enum:
+            - unspecified
+            - keyCompromise
+            - cACompromise
+            - affiliationChanged
+            - superseded
+            - cessationOfOperation
+            - certificateHold
+            - removeFromCRL
+            - privilegeWithdrawn
+            - aACompromise
+        comment:
+          type: string
+
+    RevokeCertificateResponse:
+      type: object
+      properties:
+        cert_id:
+          type: string
+        status:
+          type: string
+          example: revoked
+        revoked_at:
+          type: string
+          format: date-time
+        revoked_by:
+          type: string
+        revocation_reason:
+          type: string
+        comment:
+          type: string
+
+    BulkOperationRequest:
+      type: object
+      required:
+        - operation
+        - cert_ids
+      properties:
+        operation:
+          type: string
+          enum: [ add_tag, remove_tag, update_metadata, export, renew, revoke ]
+        cert_ids:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          maxItems: 100
+        params:
+          type: object
+          additionalProperties: true
+
+    BulkOperationResponse:
+      type: object
+      properties:
+        operation:
+          type: string
+        total:
+          type: integer
+        succeeded:
+          type: integer
+        failed:
+          type: integer
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              cert_id:
+                type: string
+              status:
+                type: string
+                enum: [ success, failed ]
+              error:
+                type: string
+                nullable: true
+
+    ValidationResult:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        chain_valid:
+          type: boolean
+        revocation_status:
+          type: string
+          enum: [ good, revoked, unknown ]
+        expires_at:
+          type: string
+          format: date-time
+        days_remaining:
+          type: integer
+        issues:
+          type: array
+          items:
+            type: string
+        warnings:
+          type: array
+          items:
+            type: string
+
+    CertificateSummary:
+      type: object
+      properties:
+        total:
+          type: integer
+        active:
+          type: integer
+        expiring:
+          type: integer
+        expired:
+          type: integer
+        revoked:
+          type: integer
+
+    # ==================== CA SCHEMAS ====================
+    CA:
+      type: object
+      properties:
+        ca_id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [ root, intermediate ]
+        parent_ca_id:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [ active, inactive ]
+        subject:
+          $ref: '#/components/schemas/Subject'
+        key_algorithm:
+          type: string
+        key_size:
+          type: integer
+        signature_algorithm:
+          type: string
+        not_before:
+          type: string
+          format: date-time
+        not_after:
+          type: string
+          format: date-time
+        serial_number:
+          type: string
+        certificates_issued:
+          type: integer
+        certificates_revoked:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    CADetail:
+      allOf:
+        - $ref: '#/components/schemas/CA'
+        - type: object
+          properties:
+            certificate:
+              type: string
+              description: PEM-encoded certificate
+              example: "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
+            private_key:
+              type: string
+              description: PEM-encoded private key (sensitive - only returned to admins)
+              example: "-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
+            fingerprint_sha256:
+              type: string
+            key_usage:
+              type: array
+              items:
+                type: string
+            path_length:
+              type: integer
+              nullable: true
+            crl_distribution_points:
+              type: array
+              items:
+                type: string
+            ocsp_responders:
+              type: array
+              items:
+                type: string
+            policies:
+              $ref: '#/components/schemas/CAPolicies'
+            statistics:
+              type: object
+              properties:
+                certificates_issued:
+                  type: integer
+                certificates_active:
+                  type: integer
+                certificates_revoked:
+                  type: integer
+                certificates_expired:
+                  type: integer
+
+    CAPolicies:
+      type: object
+      properties:
+        default_validity_days:
+          type: integer
+          default: 365
+        max_validity_days:
+          type: integer
+          default: 825
+        allowed_key_algorithms:
+          type: array
+          items:
+            type: string
+          example: [ RSA, ECDSA ]
+        min_key_size_rsa:
+          type: integer
+          default: 2048
+        allowed_ec_curves:
+          type: array
+          items:
+            type: string
+          example: [ P-256, P-384, P-521 ]
+        require_san:
+          type: boolean
+          default: true
+        allow_wildcard:
+          type: boolean
+          default: false
+
+    CreateCARequest:
+      type: object
+      required:
+        - name
+        - type
+        - subject
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [ root ]
+        subject:
+          $ref: '#/components/schemas/Subject'
+        key_algorithm:
+          type: string
+          enum: [ RSA, ECDSA ]
+          default: ECDSA
+        key_size:
+          type: integer
+          default: 384
+        signature_algorithm:
+          type: string
+          default: SHA384withECDSA
+        validity_days:
+          type: integer
+          default: 3650
+        policies:
+          $ref: '#/components/schemas/CAPolicies'
+
+    CreateIntermediateCARequest:
+      type: object
+      required:
+        - name
+        - subject
+      properties:
+        name:
+          type: string
+        subject:
+          $ref: '#/components/schemas/Subject'
+        key_algorithm:
+          type: string
+          default: ECDSA
+        key_size:
+          type: integer
+          default: 384
+        validity_days:
+          type: integer
+          default: 1825
+        path_length:
+          type: integer
+          nullable: true
+        policies:
+          $ref: '#/components/schemas/CAPolicies'
+
+    ImportCARequest:
+      type: object
+      required:
+        - name
+        - certificate
+        - private_key
+      properties:
+        name:
+          type: string
+          description: Friendly name for the CA
+          example: "Legacy Root CA"
+          minLength: 1
+          maxLength: 100
+        certificate:
+          type: string
+          description: PEM-encoded X.509 CA certificate
+          example: "-----BEGIN CERTIFICATE-----\nMIICxjCCAa6gAwIBAgIQf...\n-----END CERTIFICATE-----"
+        private_key:
+          type: string
+          description: PEM-encoded private key (RSA, ECDSA, or Ed25519)
+          example: "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----"
+        private_key_password:
+          type: string
+          description: Password if private key is encrypted (optional)
+          nullable: true
+          example: "my-secure-password"
+
+    ImportCAResponse:
+      type: object
+      properties:
+        ca_id:
+          type: string
+          example: "ca_imported_001"
+        name:
+          type: string
+          example: "Legacy Root CA"
+        type:
+          type: string
+          enum: [ root, intermediate ]
+          example: "root"
+        common_name:
+          type: string
+          example: "Acme Corp Legacy Root CA"
+        serial_number:
+          type: string
+          example: "01:23:45:67:89:AB:CD:EF"
+        status:
+          type: string
+          enum: [ active, inactive ]
+          example: "active"
+        not_before:
+          type: string
+          format: date-time
+          example: "2020-01-01T00:00:00Z"
+        not_after:
+          type: string
+          format: date-time
+          example: "2030-01-01T00:00:00Z"
+        parent_ca_id:
+          type: string
+          nullable: true
+          description: Parent CA ID if intermediate CA and parent found
+          example: "ca_root_001"
+        created_at:
+          type: string
+          format: date-time
+          example: "2024-10-31T20:00:00Z"
+        message:
+          type: string
+          example: "CA imported successfully"
+        warnings:
+          type: array
+          description: Non-fatal warnings about the imported CA
+          items:
+            type: string
+          example:
+            - "Certificate expires in 45 days"
+            - "RSA key size below 4096 bits"
+
+    CreateCAResponse:
+      type: object
+      properties:
+        ca_id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+        certificate:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    # ==================== TEMPLATE SCHEMAS ====================
+    Template:
+      type: object
+      properties:
+        template_id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        ca_id:
+          type: string
+        subject_template:
+          type: object
+          properties:
+            organization:
+              type: string
+            organizational_unit:
+              type: string
+            country:
+              type: string
+        key_algorithm:
+          type: string
+        key_size:
+          type: integer
+        validity_days:
+          type: integer
+        key_usage:
+          type: array
+          items:
+            type: string
+        extended_key_usage:
+          type: array
+          items:
+            type: string
+        tags:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+
+    CreateTemplateRequest:
+      type: object
+      required:
+        - name
+        - ca_id
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        ca_id:
+          type: string
+        subject_template:
+          type: object
+        key_algorithm:
+          type: string
+        key_size:
+          type: integer
+        validity_days:
+          type: integer
+        key_usage:
+          type: array
+          items:
+            type: string
+        extended_key_usage:
+          type: array
+          items:
+            type: string
+        tags:
+          type: array
+          items:
+            type: string
+
+    UpdateTemplateRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        validity_days:
+          type: integer
+        tags:
+          type: array
+          items:
+            type: string
+
+    # ==================== AUDIT SCHEMAS ====================
+    AuditLog:
+      type: object
+      properties:
+        log_id:
+          type: string
+        tenant_id:
+          type: string
+        user_id:
+          type: string
+        user_email:
+          type: string
+        action:
+          type: string
+          example: certificate.issued
+        resource_type:
+          type: string
+          example: certificate
+        resource_id:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+        ip_address:
+          type: string
+        user_agent:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    # ==================== WEBHOOK SCHEMAS ====================
+    Webhook:
+      type: object
+      properties:
+        webhook_id:
+          type: string
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            type: string
+          example: [ certificate.issued, certificate.revoked, certificate.expiring ]
+        secret:
+          type: string
+          description: HMAC secret for signature verification
+        active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    CreateWebhookRequest:
+      type: object
+      required:
+        - url
+        - events
+      properties:
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            type: string
+          minItems: 1
+        secret:
+          type: string
+          description: Optional HMAC secret
+
+    # ==================== COMMON SCHEMAS ====================
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 247
+        total_pages:
+          type: integer
+          example: 13
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: invalid_request
+        message:
+          type: string
+          example: The request is invalid
+        details:
+          type: object
+          additionalProperties: true
+        timestamp:
+          type: string
+          format: date-time
+
+security:
+  - bearerAuth: [ ]
+
