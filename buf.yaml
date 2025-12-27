@@ -1,8 +1,10 @@
 version: v2
 modules:
   - path: proto
+    name: buf.build/purecerts/api
 deps:
   - buf.build/googleapis/googleapis
+  - buf.build/bufbuild/protovalidate
 lint:
   use:
     - DEFAULT

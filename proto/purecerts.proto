@@ -2,29 +2,30 @@ syntax = "proto3";
 
 package purecerts.v1;
 
-option go_package = "github.com/purecerts/api/gen/purecerts/v1;purecertsv1";
+option go_package = "github.com/vinodhalaharvi/grpc-web-template/gen/go/purecerts/v1;purecertsv1";
 
-import "google/api/annotations.proto";
+import "buf/validate/validate.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 
 // =============================================================================
 // COMMON TYPES
+// =============================================================================
 
 message Pagination {
-  int32 page = 1;
-  int32 limit = 2;
+  int32 page = 1 [(buf.validate.field).int32.gte = 1];
+  int32 limit = 2 [(buf.validate.field).int32 = {gte: 1, lte: 100}];
   int32 total = 3;
   int32 total_pages = 4;
 }
 
 message Subject {
-  string common_name = 1;
-  string organization = 2;
-  string organizational_unit = 3;
-  string country = 4;
-  string state = 5;
-  string locality = 6;
+  string common_name = 1 [(buf.validate.field).string.max_len = 255];
+  string organization = 2 [(buf.validate.field).string.max_len = 255];
+  string organizational_unit = 3 [(buf.validate.field).string.max_len = 255];
+  string country = 4 [(buf.validate.field).string = {min_len: 0, max_len: 2}];
+  string state = 5 [(buf.validate.field).string.max_len = 255];
+  string locality = 6 [(buf.validate.field).string.max_len = 255];
 }
 
 message Metadata {
@@ -75,75 +76,327 @@ enum Role {
 }
 
 // =============================================================================
-// AUTH SERVICE
+// TOKEN SERVICE (OAuth2/JWT Standard)
 // =============================================================================
 
-service AuthService {
-  rpc Register(RegisterRequest) returns (AuthResponse) {
-    option (google.api.http) = {
-      post: "/v1/auth/register"
-      body: "*"
-    };
-  }
+service TokenService {
+  // Create token (login) - OAuth2 token endpoint
+  rpc CreateToken(CreateTokenRequest) returns (TokenResponse);
 
-  rpc Login(LoginRequest) returns (AuthResponse) {
-    option (google.api.http) = {
-      post: "/v1/auth/login"
-      body: "*"
-    };
-  }
+  // Refresh token - OAuth2 refresh
+  rpc RefreshToken(RefreshTokenRequest) returns (TokenResponse);
 
-  rpc RefreshToken(RefreshTokenRequest) returns (AuthResponse) {
-    option (google.api.http) = {
-      post: "/v1/auth/refresh"
-      body: "*"
-    };
-  }
+  // Revoke token - OAuth2 revocation
+  rpc RevokeToken(RevokeTokenRequest) returns (google.protobuf.Empty);
 
-  rpc Logout(google.protobuf.Empty) returns (google.protobuf.Empty) {
-    option (google.api.http) = {
-      post: "/v1/auth/logout"
-    };
-  }
-
-  rpc GetCurrentUser(google.protobuf.Empty) returns (User) {
-    option (google.api.http) = {
-      get: "/v1/auth/me"
-    };
-  }
+  // Introspect token - OAuth2 introspection (RFC 7662)
+  rpc IntrospectToken(IntrospectTokenRequest) returns (IntrospectTokenResponse);
 }
 
-message RegisterRequest {
-  string email = 1;
-  string password = 2;
-  string first_name = 3;
-  string last_name = 4;
-  string company = 5;
+// OAuth2 grant types
+enum GrantType {
+  GRANT_TYPE_UNSPECIFIED = 0;
+  GRANT_TYPE_PASSWORD = 1;          // Resource owner password
+  GRANT_TYPE_REFRESH_TOKEN = 2;     // Refresh token
+  GRANT_TYPE_CLIENT_CREDENTIALS = 3; // Service-to-service
 }
 
-message LoginRequest {
-  string email = 1;
-  string password = 2;
+message CreateTokenRequest {
+  GrantType grant_type = 1 [(buf.validate.field).enum.defined_only = true];
+
+  // For password grant
+  string username = 2 [(buf.validate.field).string.email = true];
+  string password = 3 [(buf.validate.field).string = {min_len: 8, max_len: 128}];
+
+  // For client credentials
+  string client_id = 4;
+  string client_secret = 5;
+
+  // Optional scope
+  string scope = 6;
 }
 
 message RefreshTokenRequest {
-  string refresh_token = 1;
+  string refresh_token = 1 [(buf.validate.field).string.min_len = 1];
 }
 
-message AuthResponse {
+message RevokeTokenRequest {
+  string token = 1 [(buf.validate.field).string.min_len = 1];
+  string token_type_hint = 2; // "access_token" or "refresh_token"
+}
+
+message IntrospectTokenRequest {
+  string token = 1 [(buf.validate.field).string.min_len = 1];
+  string token_type_hint = 2;
+}
+
+// OAuth2 Token Response (RFC 6749)
+message TokenResponse {
   string access_token = 1;
-  string refresh_token = 2;
-  int64 expires_in = 3;
-  User user = 4;
+  string token_type = 2;      // Always "Bearer"
+  int64 expires_in = 3;       // Seconds until expiration
+  string refresh_token = 4;
+  string scope = 5;
+
+  // Extended: Include user info (common practice)
+  User user = 6;
+
+  // 2FA: If set, user must call Verify2FA before accessing resources
+  string mfa_token = 7;       // Temporary token for 2FA verification
+  bool mfa_required = 8;      // True if 2FA is required
+}
+
+// OAuth2 Introspection Response (RFC 7662)
+message IntrospectTokenResponse {
+  bool active = 1;
+  string scope = 2;
+  string client_id = 3;
+  string username = 4;
+  string token_type = 5;
+  int64 exp = 6;              // Expiration timestamp
+  int64 iat = 7;              // Issued at timestamp
+  int64 nbf = 8;              // Not before timestamp
+  string sub = 9;             // Subject (user_id)
+  string aud = 10;            // Audience
+  string iss = 11;            // Issuer
+  string jti = 12;            // JWT ID
+
+  // Extended
+  string tenant_id = 13;
+  Role role = 14;
+}
+
+// =============================================================================
+// USER SERVICE
+// =============================================================================
+
+service UserService {
+  // Register new user
+  rpc CreateUser(CreateUserRequest) returns (User);
+
+  // Get current user (from token)
+  rpc GetCurrentUser(google.protobuf.Empty) returns (User);
+
+  // Get user by ID (admin only)
+  rpc GetUser(GetUserRequest) returns (User);
+
+  // Update user
+  rpc UpdateUser(UpdateUserRequest) returns (User);
+
+  // Delete user
+  rpc DeleteUser(DeleteUserRequest) returns (google.protobuf.Empty);
+
+  // List users in tenant
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+
+  // Change password
+  rpc ChangePassword(ChangePasswordRequest) returns (google.protobuf.Empty);
+
+  // Request password reset
+  rpc RequestPasswordReset(RequestPasswordResetRequest) returns (google.protobuf.Empty);
+
+  // Reset password with token
+  rpc ResetPassword(ResetPasswordRequest) returns (google.protobuf.Empty);
+
+  // ---------- Email Verification ----------
+
+  // Verify email with token (from email link)
+  rpc VerifyEmail(VerifyEmailRequest) returns (google.protobuf.Empty);
+
+  // Resend verification email
+  rpc ResendVerificationEmail(google.protobuf.Empty) returns (google.protobuf.Empty);
+
+  // ---------- Invite Flow ----------
+
+  // Invite user to tenant (admin only)
+  rpc InviteUser(InviteUserRequest) returns (Invite);
+
+  // List pending invites
+  rpc ListInvites(ListInvitesRequest) returns (ListInvitesResponse);
+
+  // Cancel invite
+  rpc CancelInvite(CancelInviteRequest) returns (google.protobuf.Empty);
+
+  // Accept invite (creates user account)
+  rpc AcceptInvite(AcceptInviteRequest) returns (User);
+
+  // ---------- 2FA / MFA ----------
+
+  // Enable 2FA - returns secret + QR code
+  rpc Enable2FA(google.protobuf.Empty) returns (Enable2FAResponse);
+
+  // Confirm 2FA setup with TOTP code
+  rpc Confirm2FA(Confirm2FARequest) returns (Confirm2FAResponse);
+
+  // Disable 2FA
+  rpc Disable2FA(Disable2FARequest) returns (google.protobuf.Empty);
+
+  // Verify 2FA during login
+  rpc Verify2FA(Verify2FARequest) returns (TokenResponse);
+
+  // Get 2FA status
+  rpc Get2FAStatus(google.protobuf.Empty) returns (TwoFactorStatus);
+
+  // Regenerate backup codes
+  rpc RegenerateBackupCodes(RegenerateBackupCodesRequest) returns (BackupCodesResponse);
+}
+
+// ---------- Email Verification Messages ----------
+
+message VerifyEmailRequest {
+  string token = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+// ---------- Invite Messages ----------
+
+message Invite {
+  string invite_id = 1;
+  string tenant_id = 2;
+  string email = 3;
+  Role role = 4;
+  string invited_by = 5;
+  InviteStatus status = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp expires_at = 8;
+}
+
+enum InviteStatus {
+  INVITE_STATUS_UNSPECIFIED = 0;
+  INVITE_STATUS_PENDING = 1;
+  INVITE_STATUS_ACCEPTED = 2;
+  INVITE_STATUS_EXPIRED = 3;
+  INVITE_STATUS_CANCELED = 4;
+}
+
+message InviteUserRequest {
+  string email = 1 [(buf.validate.field).string.email = true];
+  Role role = 2 [(buf.validate.field).enum.defined_only = true];
+}
+
+message ListInvitesRequest {
+  int32 page = 1;
+  int32 limit = 2 [(buf.validate.field).int32 = {gte: 1, lte: 100}];
+  optional InviteStatus status = 3;
+}
+
+message ListInvitesResponse {
+  repeated Invite invites = 1;
+  Pagination pagination = 2;
+}
+
+message CancelInviteRequest {
+  string invite_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message AcceptInviteRequest {
+  string token = 1 [(buf.validate.field).string.min_len = 1];
+  string password = 2 [(buf.validate.field).string = {min_len: 8, max_len: 128}];
+  string first_name = 3 [(buf.validate.field).string = {min_len: 1, max_len: 50}];
+  string last_name = 4 [(buf.validate.field).string = {min_len: 1, max_len: 50}];
+}
+
+// ---------- 2FA Messages ----------
+
+message Enable2FAResponse {
+  string secret = 1;           // Base32 encoded TOTP secret
+  string qr_code_uri = 2;      // otpauth:// URI for QR code
+  string qr_code_base64 = 3;   // QR code image as base64 PNG
+}
+
+message Confirm2FARequest {
+  string code = 1 [(buf.validate.field).string = {min_len: 6, max_len: 6}];
+}
+
+message Confirm2FAResponse {
+  repeated string backup_codes = 1;  // One-time backup codes
+}
+
+message Disable2FARequest {
+  string code = 1 [(buf.validate.field).string = {min_len: 6, max_len: 6}];  // Current TOTP or backup code
+}
+
+message Verify2FARequest {
+  string code = 1 [(buf.validate.field).string = {min_len: 6, max_len: 8}];  // TOTP or backup code
+  string mfa_token = 2 [(buf.validate.field).string.min_len = 1];  // Temporary token from login
+}
+
+message TwoFactorStatus {
+  bool enabled = 1;
+  google.protobuf.Timestamp enabled_at = 2;
+  int32 backup_codes_remaining = 3;
+}
+
+message RegenerateBackupCodesRequest {
+  string code = 1 [(buf.validate.field).string = {min_len: 6, max_len: 6}];  // Current TOTP code
+}
+
+message BackupCodesResponse {
+  repeated string backup_codes = 1;
 }
 
 message User {
   string user_id = 1;
-  string email = 2;
-  string first_name = 3;
-  string last_name = 4;
-  Role role = 5;
-  string tenant_id = 6;
+  string tenant_id = 2;
+  string email = 3;
+  string first_name = 4;
+  string last_name = 5;
+  Role role = 6;
+  bool email_verified = 7;
+  bool active = 8;
+  bool two_factor_enabled = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp updated_at = 11;
+  google.protobuf.Timestamp last_login_at = 12;
+}
+
+message CreateUserRequest {
+  string email = 1 [(buf.validate.field).string.email = true];
+  string password = 2 [(buf.validate.field).string = {min_len: 8, max_len: 128}];
+  string first_name = 3 [(buf.validate.field).string = {min_len: 1, max_len: 50}];
+  string last_name = 4 [(buf.validate.field).string = {min_len: 1, max_len: 50}];
+  string company = 5 [(buf.validate.field).string.max_len = 100];
+}
+
+message GetUserRequest {
+  string user_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message UpdateUserRequest {
+  string user_id = 1 [(buf.validate.field).string.min_len = 1];
+  optional string first_name = 2 [(buf.validate.field).string.max_len = 50];
+  optional string last_name = 3 [(buf.validate.field).string.max_len = 50];
+  optional Role role = 4;
+  optional bool active = 5;
+}
+
+message DeleteUserRequest {
+  string user_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message ListUsersRequest {
+  int32 page = 1 [(buf.validate.field).int32.gte = 0];
+  int32 limit = 2 [(buf.validate.field).int32 = {gte: 1, lte: 100}];
+  optional Role role = 3;
+  optional bool active = 4;
+}
+
+message ListUsersResponse {
+  repeated User users = 1;
+  Pagination pagination = 2;
+}
+
+message ChangePasswordRequest {
+  string current_password = 1 [(buf.validate.field).string.min_len = 1];
+  string new_password = 2 [(buf.validate.field).string = {min_len: 8, max_len: 128}];
+}
+
+message RequestPasswordResetRequest {
+  string email = 1 [(buf.validate.field).string.email = true];
+}
+
+message ResetPasswordRequest {
+  string token = 1 [(buf.validate.field).string.min_len = 1];
+  string new_password = 2 [(buf.validate.field).string = {min_len: 8, max_len: 128}];
 }
 
 // =============================================================================
@@ -151,31 +404,9 @@ message User {
 // =============================================================================
 
 service TenantService {
-  rpc GetTenant(GetTenantRequest) returns (Tenant) {
-    option (google.api.http) = {
-      get: "/v1/tenants/{tenant_id}"
-    };
-  }
-
-  rpc UpdateTenant(UpdateTenantRequest) returns (Tenant) {
-    option (google.api.http) = {
-      patch: "/v1/tenants/{tenant_id}"
-      body: "*"
-    };
-  }
-
-  rpc ListTenantUsers(ListTenantUsersRequest) returns (ListTenantUsersResponse) {
-    option (google.api.http) = {
-      get: "/v1/tenants/{tenant_id}/users"
-    };
-  }
-
-  rpc InviteUser(InviteUserRequest) returns (User) {
-    option (google.api.http) = {
-      post: "/v1/tenants/{tenant_id}/users/invite"
-      body: "*"
-    };
-  }
+  rpc GetTenant(GetTenantRequest) returns (Tenant);
+  rpc UpdateTenant(UpdateTenantRequest) returns (Tenant);
+  rpc GetTenantStats(GetTenantRequest) returns (TenantStats);
 }
 
 message Tenant {
@@ -184,20 +415,31 @@ message Tenant {
   TenantSettings settings = 3;
   TenantLimits limits = 4;
   google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp updated_at = 6;
 }
 
 message TenantSettings {
-  string default_ca = 1;
+  string default_ca_id = 1;
   int32 default_validity_days = 2;
-  bool auto_renewal = 3;
-  string notification_email = 4;
+  bool auto_renewal_enabled = 3;
+  int32 expiry_warning_days = 4;
+  string notification_email = 5;
 }
 
 message TenantLimits {
   int32 max_certificates = 1;
-  int32 current_certificates = 2;
-  int32 max_cas = 3;
-  int32 current_cas = 4;
+  int32 max_cas = 2;
+  int32 max_users = 3;
+}
+
+message TenantStats {
+  int32 total_certificates = 1;
+  int32 active_certificates = 2;
+  int32 expiring_certificates = 3;
+  int32 expired_certificates = 4;
+  int32 revoked_certificates = 5;
+  int32 total_cas = 6;
+  int32 total_users = 7;
 }
 
 message GetTenantRequest {
@@ -206,27 +448,8 @@ message GetTenantRequest {
 
 message UpdateTenantRequest {
   string tenant_id = 1;
-  string name = 2;
-  TenantSettings settings = 3;
-}
-
-message ListTenantUsersRequest {
-  string tenant_id = 1;
-  int32 page = 2;
-  int32 limit = 3;
-  Role role = 4;
-}
-
-message ListTenantUsersResponse {
-  repeated User users = 1;
-  Pagination pagination = 2;
-}
-
-message InviteUserRequest {
-  string tenant_id = 1;
-  string email = 2;
-  Role role = 3;
-  repeated string permissions = 4;
+  optional string name = 2 [(buf.validate.field).string.max_len = 100];
+  optional TenantSettings settings = 3;
 }
 
 // =============================================================================
@@ -234,85 +457,17 @@ message InviteUserRequest {
 // =============================================================================
 
 service CertificateService {
-  rpc ListCertificates(ListCertificatesRequest) returns (ListCertificatesResponse) {
-    option (google.api.http) = {
-      get: "/v1/certificates"
-    };
-  }
-
-  rpc GetCertificate(GetCertificateRequest) returns (Certificate) {
-    option (google.api.http) = {
-      get: "/v1/certificates/{cert_id}"
-    };
-  }
-
-  rpc IssueCertificate(IssueCertificateRequest) returns (Certificate) {
-    option (google.api.http) = {
-      post: "/v1/certificates/issue"
-      body: "*"
-    };
-  }
-
-  rpc GenerateCertificate(GenerateCertificateRequest) returns (CertificateWithKey) {
-    option (google.api.http) = {
-      post: "/v1/certificates/generate"
-      body: "*"
-    };
-  }
-
-  rpc RenewCertificate(RenewCertificateRequest) returns (Certificate) {
-    option (google.api.http) = {
-      post: "/v1/certificates/{cert_id}/renew"
-      body: "*"
-    };
-  }
-
-  rpc RevokeCertificate(RevokeCertificateRequest) returns (Certificate) {
-    option (google.api.http) = {
-      post: "/v1/certificates/{cert_id}/revoke"
-      body: "*"
-    };
-  }
-
-  rpc DeleteCertificate(DeleteCertificateRequest) returns (google.protobuf.Empty) {
-    option (google.api.http) = {
-      delete: "/v1/certificates/{cert_id}"
-    };
-  }
-
-  rpc DownloadCertificate(DownloadCertificateRequest) returns (DownloadCertificateResponse) {
-    option (google.api.http) = {
-      get: "/v1/certificates/{cert_id}/download"
-    };
-  }
-
-  rpc UpdateCertificateTags(UpdateCertificateTagsRequest) returns (Certificate) {
-    option (google.api.http) = {
-      patch: "/v1/certificates/{cert_id}/tags"
-      body: "*"
-    };
-  }
-
-  rpc UpdateCertificateMetadata(UpdateCertificateMetadataRequest) returns (Certificate) {
-    option (google.api.http) = {
-      patch: "/v1/certificates/{cert_id}/metadata"
-      body: "*"
-    };
-  }
-
-  rpc BulkOperation(BulkOperationRequest) returns (BulkOperationResponse) {
-    option (google.api.http) = {
-      post: "/v1/certificates/bulk"
-      body: "*"
-    };
-  }
-
-  rpc ValidateCertificate(ValidateCertificateRequest) returns (ValidateCertificateResponse) {
-    option (google.api.http) = {
-      post: "/v1/certificates/validate"
-      body: "*"
-    };
-  }
+  rpc ListCertificates(ListCertificatesRequest) returns (ListCertificatesResponse);
+  rpc GetCertificate(GetCertificateRequest) returns (Certificate);
+  rpc IssueCertificate(IssueCertificateRequest) returns (Certificate);
+  rpc GenerateCertificate(GenerateCertificateRequest) returns (CertificateWithKey);
+  rpc RenewCertificate(RenewCertificateRequest) returns (Certificate);
+  rpc RevokeCertificate(RevokeCertificateRequest) returns (Certificate);
+  rpc DeleteCertificate(DeleteCertificateRequest) returns (google.protobuf.Empty);
+  rpc DownloadCertificate(DownloadCertificateRequest) returns (DownloadCertificateResponse);
+  rpc UpdateCertificateTags(UpdateCertificateTagsRequest) returns (Certificate);
+  rpc UpdateCertificateMetadata(UpdateCertificateMetadataRequest) returns (Certificate);
+  rpc ValidateCertificate(ValidateCertificateRequest) returns (ValidateCertificateResponse);
 }
 
 message Certificate {
@@ -336,11 +491,12 @@ message Certificate {
   string created_by = 18;
   google.protobuf.Timestamp updated_at = 19;
   Revocation revocation = 20;
+  string fingerprint_sha256 = 21;
 }
 
 message CertificateWithKey {
   Certificate certificate = 1;
-  string private_key = 2;
+  string private_key_pem = 2;
 }
 
 message Revocation {
@@ -348,12 +504,6 @@ message Revocation {
   RevocationReason reason = 2;
   string revoked_by = 3;
   string comment = 4;
-}
-
-message CertificateChain {
-  string subject = 1;
-  string issuer = 2;
-  string serial = 3;
 }
 
 message CertificateSummary {
@@ -364,23 +514,15 @@ message CertificateSummary {
   int32 revoked = 5;
 }
 
-// List
 message ListCertificatesRequest {
-  int32 page = 1;
-  int32 limit = 2;
-  CertificateStatus status = 3;
-  string search = 4;
-  repeated string tags = 5;
-  string ca_id = 6;
-  CertificateSortField sort_by = 7;
-  bool sort_desc = 8;
-
-  enum CertificateSortField {
-    CERTIFICATE_SORT_FIELD_UNSPECIFIED = 0;
-    CERTIFICATE_SORT_FIELD_CREATED_AT = 1;
-    CERTIFICATE_SORT_FIELD_EXPIRES_AT = 2;
-    CERTIFICATE_SORT_FIELD_COMMON_NAME = 3;
-  }
+  int32 page = 1 [(buf.validate.field).int32.gte = 0];
+  int32 limit = 2 [(buf.validate.field).int32 = {gte: 1, lte: 100}];
+  optional CertificateStatus status = 3;
+  optional string search = 4 [(buf.validate.field).string.max_len = 255];
+  repeated string tags = 5 [(buf.validate.field).repeated.max_items = 10];
+  optional string ca_id = 6;
+  optional string sort_by = 7;
+  optional bool sort_desc = 8;
 }
 
 message ListCertificatesResponse {
@@ -389,57 +531,50 @@ message ListCertificatesResponse {
   CertificateSummary summary = 3;
 }
 
-// Get
 message GetCertificateRequest {
-  string cert_id = 1;
+  string cert_id = 1 [(buf.validate.field).string.min_len = 1];
 }
 
-// Issue
 message IssueCertificateRequest {
-  string ca_id = 1;
-  string csr = 2;
-  int32 validity_days = 3;
-  repeated string tags = 4;
+  string ca_id = 1 [(buf.validate.field).string.min_len = 1];
+  string csr = 2 [(buf.validate.field).string.min_len = 100];
+  int32 validity_days = 3 [(buf.validate.field).int32 = {gte: 1, lte: 825}];
+  repeated string tags = 4 [(buf.validate.field).repeated.max_items = 20];
   Metadata metadata = 5;
 }
 
-// Generate
 message GenerateCertificateRequest {
-  string ca_id = 1;
-  Subject subject = 2;
-  repeated string san = 3;
-  KeyAlgorithm key_algorithm = 4;
-  int32 key_size = 5;
-  int32 validity_days = 6;
-  repeated string tags = 7;
+  string ca_id = 1 [(buf.validate.field).string.min_len = 1];
+  Subject subject = 2 [(buf.validate.field).required = true];
+  repeated string san = 3 [(buf.validate.field).repeated.max_items = 100];
+  KeyAlgorithm key_algorithm = 4 [(buf.validate.field).enum.defined_only = true];
+  int32 key_size = 5 [(buf.validate.field).int32 = {gte: 256, lte: 8192}];
+  int32 validity_days = 6 [(buf.validate.field).int32 = {gte: 1, lte: 825}];
+  repeated string tags = 7 [(buf.validate.field).repeated.max_items = 20];
   Metadata metadata = 8;
 }
 
-// Renew
 message RenewCertificateRequest {
-  string cert_id = 1;
-  int32 validity_days = 2;
+  string cert_id = 1 [(buf.validate.field).string.min_len = 1];
+  optional int32 validity_days = 2 [(buf.validate.field).int32 = {gte: 1, lte: 825}];
   bool keep_private_key = 3;
 }
 
-// Revoke
 message RevokeCertificateRequest {
-  string cert_id = 1;
-  RevocationReason reason = 2;
-  string comment = 3;
+  string cert_id = 1 [(buf.validate.field).string.min_len = 1];
+  RevocationReason reason = 2 [(buf.validate.field).enum.defined_only = true];
+  string comment = 3 [(buf.validate.field).string.max_len = 500];
 }
 
-// Delete
 message DeleteCertificateRequest {
-  string cert_id = 1;
+  string cert_id = 1 [(buf.validate.field).string.min_len = 1];
 }
 
-// Download
 message DownloadCertificateRequest {
-  string cert_id = 1;
+  string cert_id = 1 [(buf.validate.field).string.min_len = 1];
   DownloadFormat format = 2;
   bool include_chain = 3;
-  string password = 4; // For PKCS12
+  string password = 4 [(buf.validate.field).string.max_len = 128]; // For PKCS12
 }
 
 message DownloadCertificateResponse {
@@ -448,57 +583,18 @@ message DownloadCertificateResponse {
   string content_type = 3;
 }
 
-// Tags
 message UpdateCertificateTagsRequest {
-  string cert_id = 1;
-  repeated string tags = 2;
+  string cert_id = 1 [(buf.validate.field).string.min_len = 1];
+  repeated string tags = 2 [(buf.validate.field).repeated.max_items = 20];
 }
 
-// Metadata
 message UpdateCertificateMetadataRequest {
-  string cert_id = 1;
+  string cert_id = 1 [(buf.validate.field).string.min_len = 1];
   Metadata metadata = 2;
 }
 
-// Bulk
-message BulkOperationRequest {
-  BulkOperation operation = 1;
-  repeated string cert_ids = 2;
-  BulkOperationParams params = 3;
-
-  enum BulkOperation {
-    BULK_OPERATION_UNSPECIFIED = 0;
-    BULK_OPERATION_ADD_TAG = 1;
-    BULK_OPERATION_REMOVE_TAG = 2;
-    BULK_OPERATION_UPDATE_METADATA = 3;
-    BULK_OPERATION_EXPORT = 4;
-    BULK_OPERATION_RENEW = 5;
-    BULK_OPERATION_REVOKE = 6;
-  }
-}
-
-message BulkOperationParams {
-  repeated string tags = 1;
-  Metadata metadata = 2;
-  int32 validity_days = 3;
-  RevocationReason revocation_reason = 4;
-}
-
-message BulkOperationResponse {
-  repeated BulkOperationResult results = 1;
-  int32 success_count = 2;
-  int32 failure_count = 3;
-}
-
-message BulkOperationResult {
-  string cert_id = 1;
-  bool success = 2;
-  string error = 3;
-}
-
-// Validate
 message ValidateCertificateRequest {
-  string certificate = 1;
+  string certificate_pem = 1 [(buf.validate.field).string.min_len = 100];
   bool check_revocation = 2;
 }
 
@@ -506,7 +602,7 @@ message ValidateCertificateResponse {
   bool valid = 1;
   repeated string errors = 2;
   repeated string warnings = 3;
-  Certificate certificate_info = 4;
+  Certificate certificate = 4;
 }
 
 // =============================================================================
@@ -514,87 +610,17 @@ message ValidateCertificateResponse {
 // =============================================================================
 
 service CAService {
-  rpc ListCAs(ListCAsRequest) returns (ListCAsResponse) {
-    option (google.api.http) = {
-      get: "/v1/cas"
-    };
-  }
-
-  rpc GetCA(GetCARequest) returns (CA) {
-    option (google.api.http) = {
-      get: "/v1/cas/{ca_id}"
-    };
-  }
-
-  rpc CreateCA(CreateCARequest) returns (CA) {
-    option (google.api.http) = {
-      post: "/v1/cas"
-      body: "*"
-    };
-  }
-
-  rpc CreateIntermediateCA(CreateIntermediateCARequest) returns (CA) {
-    option (google.api.http) = {
-      post: "/v1/cas/{parent_ca_id}/intermediate"
-      body: "*"
-    };
-  }
-
-  rpc ImportCA(ImportCARequest) returns (CA) {
-    option (google.api.http) = {
-      post: "/v1/cas/import"
-      body: "*"
-    };
-  }
-
-  rpc UpdateCAPolicies(UpdateCAPoliciesRequest) returns (CA) {
-    option (google.api.http) = {
-      patch: "/v1/cas/{ca_id}/policies"
-      body: "*"
-    };
-  }
-
-  rpc GetCAChain(GetCAChainRequest) returns (GetCAChainResponse) {
-    option (google.api.http) = {
-      get: "/v1/cas/{ca_id}/chain"
-    };
-  }
-
-  rpc DownloadCACertificate(DownloadCARequest) returns (DownloadCAResponse) {
-    option (google.api.http) = {
-      get: "/v1/cas/{ca_id}/download/certificate"
-    };
-  }
-
-  rpc DownloadCAPrivateKey(DownloadCARequest) returns (DownloadCAResponse) {
-    option (google.api.http) = {
-      get: "/v1/cas/{ca_id}/download/private-key"
-    };
-  }
-
-  rpc DownloadCABundle(DownloadCARequest) returns (DownloadCAResponse) {
-    option (google.api.http) = {
-      get: "/v1/cas/{ca_id}/download/bundle"
-    };
-  }
-
-  rpc DownloadCAChain(DownloadCARequest) returns (DownloadCAResponse) {
-    option (google.api.http) = {
-      get: "/v1/cas/{ca_id}/download/chain"
-    };
-  }
-
-  rpc GetCRL(GetCRLRequest) returns (GetCRLResponse) {
-    option (google.api.http) = {
-      get: "/v1/cas/{ca_id}/crl"
-    };
-  }
-
-  rpc GenerateCRL(GenerateCRLRequest) returns (GetCRLResponse) {
-    option (google.api.http) = {
-      post: "/v1/cas/{ca_id}/crl/generate"
-    };
-  }
+  rpc ListCAs(ListCAsRequest) returns (ListCAsResponse);
+  rpc GetCA(GetCARequest) returns (CA);
+  rpc CreateCA(CreateCARequest) returns (CA);
+  rpc CreateIntermediateCA(CreateIntermediateCARequest) returns (CA);
+  rpc ImportCA(ImportCARequest) returns (CA);
+  rpc UpdateCA(UpdateCARequest) returns (CA);
+  rpc DeleteCA(DeleteCARequest) returns (google.protobuf.Empty);
+  rpc GetCAChain(GetCAChainRequest) returns (GetCAChainResponse);
+  rpc DownloadCA(DownloadCARequest) returns (DownloadCAResponse);
+  rpc GetCRL(GetCRLRequest) returns (GetCRLResponse);
+  rpc GenerateCRL(GenerateCRLRequest) returns (GetCRLResponse);
 }
 
 message CA {
@@ -610,24 +636,27 @@ message CA {
   google.protobuf.Timestamp not_before = 10;
   google.protobuf.Timestamp not_after = 11;
   string serial_number = 12;
-  CAStatistics statistics = 13;
-  CAPolicies policies = 14;
-  google.protobuf.Timestamp created_at = 15;
-
-  enum CAType {
-    CA_TYPE_UNSPECIFIED = 0;
-    CA_TYPE_ROOT = 1;
-    CA_TYPE_INTERMEDIATE = 2;
-  }
-
-  enum CAStatus {
-    CA_STATUS_UNSPECIFIED = 0;
-    CA_STATUS_ACTIVE = 1;
-    CA_STATUS_INACTIVE = 2;
-  }
+  string fingerprint_sha256 = 13;
+  CAStats stats = 14;
+  CAPolicies policies = 15;
+  google.protobuf.Timestamp created_at = 16;
+  google.protobuf.Timestamp updated_at = 17;
 }
 
-message CAStatistics {
+enum CAType {
+  CA_TYPE_UNSPECIFIED = 0;
+  CA_TYPE_ROOT = 1;
+  CA_TYPE_INTERMEDIATE = 2;
+}
+
+enum CAStatus {
+  CA_STATUS_UNSPECIFIED = 0;
+  CA_STATUS_ACTIVE = 1;
+  CA_STATUS_INACTIVE = 2;
+  CA_STATUS_PENDING = 3;
+}
+
+message CAStats {
   int32 certificates_issued = 1;
   int32 certificates_active = 2;
   int32 certificates_revoked = 3;
@@ -638,16 +667,18 @@ message CAPolicies {
   int32 default_validity_days = 1;
   int32 max_validity_days = 2;
   repeated KeyAlgorithm allowed_key_algorithms = 3;
-  int32 min_key_size_rsa = 4;
+  int32 min_rsa_key_size = 4;
   repeated string allowed_ec_curves = 5;
   bool require_san = 6;
   bool allow_wildcard = 7;
+  repeated string allowed_domains = 8;
 }
 
-// List
 message ListCAsRequest {
   int32 page = 1;
-  int32 limit = 2;
+  int32 limit = 2 [(buf.validate.field).int32 = {gte: 1, lte: 100}];
+  optional CAStatus status = 3;
+  optional CAType type = 4;
 }
 
 message ListCAsResponse {
@@ -655,60 +686,70 @@ message ListCAsResponse {
   Pagination pagination = 2;
 }
 
-// Get
 message GetCARequest {
-  string ca_id = 1;
+  string ca_id = 1 [(buf.validate.field).string.min_len = 1];
 }
 
-// Create Root
 message CreateCARequest {
-  string name = 1;
-  Subject subject = 2;
-  KeyAlgorithm key_algorithm = 3;
-  int32 key_size = 4;
+  string name = 1 [(buf.validate.field).string = {min_len: 1, max_len: 100}];
+  Subject subject = 2 [(buf.validate.field).required = true];
+  KeyAlgorithm key_algorithm = 3 [(buf.validate.field).enum.defined_only = true];
+  int32 key_size = 4 [(buf.validate.field).int32 = {gte: 2048, lte: 8192}];
   string signature_algorithm = 5;
-  int32 validity_days = 6;
+  int32 validity_years = 6 [(buf.validate.field).int32 = {gte: 1, lte: 30}];
   CAPolicies policies = 7;
 }
 
-// Create Intermediate
 message CreateIntermediateCARequest {
-  string parent_ca_id = 1;
-  string name = 2;
-  Subject subject = 3;
+  string parent_ca_id = 1 [(buf.validate.field).string.min_len = 1];
+  string name = 2 [(buf.validate.field).string = {min_len: 1, max_len: 100}];
+  Subject subject = 3 [(buf.validate.field).required = true];
   KeyAlgorithm key_algorithm = 4;
-  int32 key_size = 5;
-  int32 validity_days = 6;
-  int32 path_length = 7;
+  int32 key_size = 5 [(buf.validate.field).int32 = {gte: 2048, lte: 8192}];
+  int32 validity_years = 6 [(buf.validate.field).int32 = {gte: 1, lte: 20}];
+  int32 path_length = 7 [(buf.validate.field).int32 = {gte: 0, lte: 5}];
   CAPolicies policies = 8;
 }
 
-// Import
 message ImportCARequest {
-  string name = 1;
-  string certificate = 2;
-  string private_key = 3;
+  string name = 1 [(buf.validate.field).string = {min_len: 1, max_len: 100}];
+  string certificate_pem = 2 [(buf.validate.field).string.min_len = 100];
+  string private_key_pem = 3 [(buf.validate.field).string.min_len = 100];
   string private_key_password = 4;
+  optional string parent_ca_id = 5;
 }
 
-// Update Policies
-message UpdateCAPoliciesRequest {
-  string ca_id = 1;
-  CAPolicies policies = 2;
+message UpdateCARequest {
+  string ca_id = 1 [(buf.validate.field).string.min_len = 1];
+  optional string name = 2 [(buf.validate.field).string.max_len = 100];
+  optional CAStatus status = 3;
+  optional CAPolicies policies = 4;
 }
 
-// Chain
+message DeleteCARequest {
+  string ca_id = 1 [(buf.validate.field).string.min_len = 1];
+  bool force = 2; // Delete even if certificates exist
+}
+
 message GetCAChainRequest {
-  string ca_id = 1;
+  string ca_id = 1 [(buf.validate.field).string.min_len = 1];
 }
 
 message GetCAChainResponse {
-  repeated CertificateChain chain = 1;
+  repeated string certificates_pem = 1;
 }
 
-// Download
 message DownloadCARequest {
-  string ca_id = 1;
+  string ca_id = 1 [(buf.validate.field).string.min_len = 1];
+  CADownloadType type = 2;
+}
+
+enum CADownloadType {
+  CA_DOWNLOAD_TYPE_UNSPECIFIED = 0;
+  CA_DOWNLOAD_TYPE_CERTIFICATE = 1;
+  CA_DOWNLOAD_TYPE_PRIVATE_KEY = 2;
+  CA_DOWNLOAD_TYPE_CHAIN = 3;
+  CA_DOWNLOAD_TYPE_BUNDLE = 4;
 }
 
 message DownloadCAResponse {
@@ -717,118 +758,20 @@ message DownloadCAResponse {
   string content_type = 3;
 }
 
-// CRL
 message GetCRLRequest {
-  string ca_id = 1;
+  string ca_id = 1 [(buf.validate.field).string.min_len = 1];
 }
 
 message GenerateCRLRequest {
-  string ca_id = 1;
+  string ca_id = 1 [(buf.validate.field).string.min_len = 1];
 }
 
 message GetCRLResponse {
-  bytes crl = 1;
-  google.protobuf.Timestamp last_update = 2;
-  google.protobuf.Timestamp next_update = 3;
-}
-
-// =============================================================================
-// TEMPLATE SERVICE
-// =============================================================================
-
-service TemplateService {
-  rpc ListTemplates(ListTemplatesRequest) returns (ListTemplatesResponse) {
-    option (google.api.http) = {
-      get: "/v1/templates"
-    };
-  }
-
-  rpc GetTemplate(GetTemplateRequest) returns (Template) {
-    option (google.api.http) = {
-      get: "/v1/templates/{template_id}"
-    };
-  }
-
-  rpc CreateTemplate(CreateTemplateRequest) returns (Template) {
-    option (google.api.http) = {
-      post: "/v1/templates"
-      body: "*"
-    };
-  }
-
-  rpc UpdateTemplate(UpdateTemplateRequest) returns (Template) {
-    option (google.api.http) = {
-      patch: "/v1/templates/{template_id}"
-      body: "*"
-    };
-  }
-
-  rpc DeleteTemplate(DeleteTemplateRequest) returns (google.protobuf.Empty) {
-    option (google.api.http) = {
-      delete: "/v1/templates/{template_id}"
-    };
-  }
-}
-
-message Template {
-  string template_id = 1;
-  string name = 2;
-  string description = 3;
-  string ca_id = 4;
-  SubjectTemplate subject_template = 5;
-  KeyAlgorithm key_algorithm = 6;
-  int32 key_size = 7;
-  int32 validity_days = 8;
-  repeated string key_usage = 9;
-  repeated string extended_key_usage = 10;
-  repeated string tags = 11;
-  google.protobuf.Timestamp created_at = 12;
-  google.protobuf.Timestamp updated_at = 13;
-}
-
-message SubjectTemplate {
-  string organization = 1;
-  string organizational_unit = 2;
-  string country = 3;
-}
-
-message ListTemplatesRequest {
-  int32 page = 1;
-  int32 limit = 2;
-}
-
-message ListTemplatesResponse {
-  repeated Template templates = 1;
-  Pagination pagination = 2;
-}
-
-message GetTemplateRequest {
-  string template_id = 1;
-}
-
-message CreateTemplateRequest {
-  string name = 1;
-  string description = 2;
-  string ca_id = 3;
-  SubjectTemplate subject_template = 4;
-  KeyAlgorithm key_algorithm = 5;
-  int32 key_size = 6;
-  int32 validity_days = 7;
-  repeated string key_usage = 8;
-  repeated string extended_key_usage = 9;
-  repeated string tags = 10;
-}
-
-message UpdateTemplateRequest {
-  string template_id = 1;
-  string name = 2;
-  string description = 3;
-  int32 validity_days = 4;
-  repeated string tags = 5;
-}
-
-message DeleteTemplateRequest {
-  string template_id = 1;
+  bytes crl_der = 1;
+  string crl_pem = 2;
+  google.protobuf.Timestamp this_update = 3;
+  google.protobuf.Timestamp next_update = 4;
+  int32 revoked_count = 5;
 }
 
 // =============================================================================
@@ -836,11 +779,8 @@ message DeleteTemplateRequest {
 // =============================================================================
 
 service AuditService {
-  rpc GetAuditLogs(GetAuditLogsRequest) returns (GetAuditLogsResponse) {
-    option (google.api.http) = {
-      get: "/v1/audit/logs"
-    };
-  }
+  rpc ListAuditLogs(ListAuditLogsRequest) returns (ListAuditLogsResponse);
+  rpc GetAuditLog(GetAuditLogRequest) returns (AuditLog);
 }
 
 message AuditLog {
@@ -855,85 +795,343 @@ message AuditLog {
   string ip_address = 9;
   string user_agent = 10;
   google.protobuf.Timestamp timestamp = 11;
-
-  enum AuditAction {
-    AUDIT_ACTION_UNSPECIFIED = 0;
-    AUDIT_ACTION_CERTIFICATE_ISSUED = 1;
-    AUDIT_ACTION_CERTIFICATE_RENEWED = 2;
-    AUDIT_ACTION_CERTIFICATE_REVOKED = 3;
-    AUDIT_ACTION_CA_CREATED = 4;
-    AUDIT_ACTION_USER_LOGIN = 5;
-    AUDIT_ACTION_USER_LOGOUT = 6;
-    AUDIT_ACTION_SETTINGS_UPDATED = 7;
-  }
 }
 
-message GetAuditLogsRequest {
+enum AuditAction {
+  AUDIT_ACTION_UNSPECIFIED = 0;
+  // User actions
+  AUDIT_ACTION_USER_LOGIN = 1;
+  AUDIT_ACTION_USER_LOGOUT = 2;
+  AUDIT_ACTION_USER_CREATED = 3;
+  AUDIT_ACTION_USER_UPDATED = 4;
+  AUDIT_ACTION_USER_DELETED = 5;
+  AUDIT_ACTION_USER_INVITED = 6;
+  AUDIT_ACTION_USER_INVITE_ACCEPTED = 7;
+  AUDIT_ACTION_PASSWORD_CHANGED = 8;
+  AUDIT_ACTION_PASSWORD_RESET = 9;
+  // 2FA actions
+  AUDIT_ACTION_2FA_ENABLED = 15;
+  AUDIT_ACTION_2FA_DISABLED = 16;
+  // Certificate actions
+  AUDIT_ACTION_CERTIFICATE_ISSUED = 20;
+  AUDIT_ACTION_CERTIFICATE_GENERATED = 21;
+  AUDIT_ACTION_CERTIFICATE_RENEWED = 22;
+  AUDIT_ACTION_CERTIFICATE_REVOKED = 23;
+  AUDIT_ACTION_CERTIFICATE_DELETED = 24;
+  // CA actions
+  AUDIT_ACTION_CA_CREATED = 30;
+  AUDIT_ACTION_CA_UPDATED = 31;
+  AUDIT_ACTION_CA_DELETED = 32;
+  AUDIT_ACTION_CA_IMPORTED = 33;
+  // API Key actions
+  AUDIT_ACTION_API_KEY_CREATED = 40;
+  AUDIT_ACTION_API_KEY_REVOKED = 41;
+  // Session actions
+  AUDIT_ACTION_SESSION_REVOKED = 50;
+  AUDIT_ACTION_ALL_SESSIONS_REVOKED = 51;
+  // Billing actions
+  AUDIT_ACTION_SUBSCRIPTION_CREATED = 60;
+  AUDIT_ACTION_SUBSCRIPTION_UPDATED = 61;
+  AUDIT_ACTION_SUBSCRIPTION_CANCELED = 62;
+  // Settings
+  AUDIT_ACTION_SETTINGS_UPDATED = 70;
+}
+
+message ListAuditLogsRequest {
   int32 page = 1;
-  int32 limit = 2;
-  AuditLog.AuditAction action = 3;
-  string user_id = 4;
-  google.protobuf.Timestamp from = 5;
-  google.protobuf.Timestamp to = 6;
+  int32 limit = 2 [(buf.validate.field).int32 = {gte: 1, lte: 100}];
+  optional AuditAction action = 3;
+  optional string user_id = 4;
+  optional string resource_type = 5;
+  optional string resource_id = 6;
+  optional google.protobuf.Timestamp from = 7;
+  optional google.protobuf.Timestamp to = 8;
 }
 
-message GetAuditLogsResponse {
+message ListAuditLogsResponse {
   repeated AuditLog logs = 1;
   Pagination pagination = 2;
 }
 
-// =============================================================================
-// WEBHOOK SERVICE
-// =============================================================================
-
-service WebhookService {
-  rpc ListWebhooks(ListWebhooksRequest) returns (ListWebhooksResponse) {
-    option (google.api.http) = {
-      get: "/v1/webhooks"
-    };
-  }
-
-  rpc CreateWebhook(CreateWebhookRequest) returns (Webhook) {
-    option (google.api.http) = {
-      post: "/v1/webhooks"
-      body: "*"
-    };
-  }
-
-  rpc DeleteWebhook(DeleteWebhookRequest) returns (google.protobuf.Empty) {
-    option (google.api.http) = {
-      delete: "/v1/webhooks/{webhook_id}"
-    };
-  }
+message GetAuditLogRequest {
+  string log_id = 1 [(buf.validate.field).string.min_len = 1];
 }
 
-message Webhook {
-  string webhook_id = 1;
-  string url = 2;
-  repeated string events = 3;
-  bool active = 4;
-  google.protobuf.Timestamp created_at = 5;
-  google.protobuf.Timestamp last_triggered_at = 6;
+// =============================================================================
+// SESSION SERVICE
+// =============================================================================
+
+service SessionService {
+  // List active sessions for current user
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+
+  // Get current session details
+  rpc GetCurrentSession(google.protobuf.Empty) returns (Session);
+
+  // Revoke a specific session
+  rpc RevokeSession(RevokeSessionRequest) returns (google.protobuf.Empty);
+
+  // Revoke all sessions except current
+  rpc RevokeAllOtherSessions(google.protobuf.Empty) returns (RevokeAllSessionsResponse);
+
+  // Revoke all sessions (logout everywhere)
+  rpc RevokeAllSessions(google.protobuf.Empty) returns (RevokeAllSessionsResponse);
 }
 
-message ListWebhooksRequest {
+message Session {
+  string session_id = 1;
+  string user_id = 2;
+  string ip_address = 3;
+  string user_agent = 4;
+  string device_type = 5;       // "desktop", "mobile", "tablet"
+  string browser = 6;           // "Chrome", "Safari", etc.
+  string os = 7;                // "macOS", "Windows", etc.
+  string location = 8;          // "San Francisco, CA, US" (from IP)
+  bool current = 9;             // Is this the current session?
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp last_active_at = 11;
+  google.protobuf.Timestamp expires_at = 12;
+}
+
+message ListSessionsRequest {
   int32 page = 1;
-  int32 limit = 2;
+  int32 limit = 2 [(buf.validate.field).int32 = {gte: 1, lte: 100}];
 }
 
-message ListWebhooksResponse {
-  repeated Webhook webhooks = 1;
+message ListSessionsResponse {
+  repeated Session sessions = 1;
   Pagination pagination = 2;
 }
 
-message CreateWebhookRequest {
-  string url = 1;
-  repeated string events = 2;
-  string secret = 3;
+message RevokeSessionRequest {
+  string session_id = 1 [(buf.validate.field).string.min_len = 1];
 }
 
-message DeleteWebhookRequest {
-  string webhook_id = 1;
+message RevokeAllSessionsResponse {
+  int32 revoked_count = 1;
+}
+
+// =============================================================================
+// API KEY SERVICE
+// =============================================================================
+
+service APIKeyService {
+  // Create new API key
+  rpc CreateAPIKey(CreateAPIKeyRequest) returns (CreateAPIKeyResponse);
+
+  // List API keys (secrets are masked)
+  rpc ListAPIKeys(ListAPIKeysRequest) returns (ListAPIKeysResponse);
+
+  // Get API key details (secret masked)
+  rpc GetAPIKey(GetAPIKeyRequest) returns (APIKey);
+
+  // Update API key (name, scopes, expiry)
+  rpc UpdateAPIKey(UpdateAPIKeyRequest) returns (APIKey);
+
+  // Revoke API key
+  rpc RevokeAPIKey(RevokeAPIKeyRequest) returns (google.protobuf.Empty);
+}
+
+message APIKey {
+  string key_id = 1;
+  string name = 2;
+  string key_prefix = 3;        // First 8 chars for identification: "pc_live_abc12345..."
+  repeated string scopes = 4;   // ["certificates:read", "certificates:write", "cas:read"]
+  APIKeyStatus status = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp last_used_at = 7;
+  google.protobuf.Timestamp expires_at = 8;  // Optional expiry
+  string created_by = 9;
+}
+
+enum APIKeyStatus {
+  API_KEY_STATUS_UNSPECIFIED = 0;
+  API_KEY_STATUS_ACTIVE = 1;
+  API_KEY_STATUS_REVOKED = 2;
+  API_KEY_STATUS_EXPIRED = 3;
+}
+
+message CreateAPIKeyRequest {
+  string name = 1 [(buf.validate.field).string = {min_len: 1, max_len: 100}];
+  repeated string scopes = 2 [(buf.validate.field).repeated = {min_items: 1, max_items: 20}];
+  optional int32 expires_in_days = 3 [(buf.validate.field).int32 = {gte: 1, lte: 365}];  // 0 = never
+}
+
+message CreateAPIKeyResponse {
+  APIKey api_key = 1;
+  string secret = 2;  // Full secret - only shown once!
+}
+
+message ListAPIKeysRequest {
+  int32 page = 1;
+  int32 limit = 2 [(buf.validate.field).int32 = {gte: 1, lte: 100}];
+  optional APIKeyStatus status = 3;
+}
+
+message ListAPIKeysResponse {
+  repeated APIKey api_keys = 1;
+  Pagination pagination = 2;
+}
+
+message GetAPIKeyRequest {
+  string key_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message UpdateAPIKeyRequest {
+  string key_id = 1 [(buf.validate.field).string.min_len = 1];
+  optional string name = 2 [(buf.validate.field).string.max_len = 100];
+  repeated string scopes = 3;
+}
+
+message RevokeAPIKeyRequest {
+  string key_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+// =============================================================================
+// BILLING SERVICE (Stripe Integration)
+// =============================================================================
+
+service BillingService {
+  // Get current subscription
+  rpc GetSubscription(google.protobuf.Empty) returns (Subscription);
+
+  // Get available plans
+  rpc ListPlans(google.protobuf.Empty) returns (ListPlansResponse);
+
+  // Create checkout session (redirect to Stripe)
+  rpc CreateCheckoutSession(CreateCheckoutSessionRequest) returns (CheckoutSession);
+
+  // Get billing portal URL (Stripe customer portal)
+  rpc GetBillingPortalUrl(google.protobuf.Empty) returns (BillingPortalUrl);
+
+  // Get current usage
+  rpc GetUsage(google.protobuf.Empty) returns (Usage);
+
+  // List invoices
+  rpc ListInvoices(ListInvoicesRequest) returns (ListInvoicesResponse);
+
+  // Get invoice
+  rpc GetInvoice(GetInvoiceRequest) returns (Invoice);
+}
+
+message Subscription {
+  string subscription_id = 1;
+  string plan_id = 2;
+  string plan_name = 3;
+  SubscriptionStatus status = 4;
+  google.protobuf.Timestamp current_period_start = 5;
+  google.protobuf.Timestamp current_period_end = 6;
+  bool cancel_at_period_end = 7;
+  google.protobuf.Timestamp canceled_at = 8;
+  google.protobuf.Timestamp trial_end = 9;
+  PlanLimits limits = 10;
+}
+
+enum SubscriptionStatus {
+  SUBSCRIPTION_STATUS_UNSPECIFIED = 0;
+  SUBSCRIPTION_STATUS_TRIALING = 1;
+  SUBSCRIPTION_STATUS_ACTIVE = 2;
+  SUBSCRIPTION_STATUS_PAST_DUE = 3;
+  SUBSCRIPTION_STATUS_CANCELED = 4;
+  SUBSCRIPTION_STATUS_UNPAID = 5;
+  SUBSCRIPTION_STATUS_INCOMPLETE = 6;
+}
+
+message Plan {
+  string plan_id = 1;
+  string name = 2;               // "Starter", "Pro", "Enterprise"
+  string description = 3;
+  int64 price_cents = 4;         // Price in cents (e.g., 2999 = $29.99)
+  string currency = 5;           // "usd"
+  BillingInterval interval = 6;
+  PlanLimits limits = 7;
+  repeated string features = 8;  // Feature list for display
+  bool popular = 9;              // Highlight this plan
+}
+
+enum BillingInterval {
+  BILLING_INTERVAL_UNSPECIFIED = 0;
+  BILLING_INTERVAL_MONTHLY = 1;
+  BILLING_INTERVAL_YEARLY = 2;
+}
+
+message PlanLimits {
+  int32 max_certificates = 1;
+  int32 max_cas = 2;
+  int32 max_users = 3;
+  int32 max_api_keys = 4;
+  bool custom_domains = 5;
+  bool audit_log_retention_days = 6;
+  bool sso_enabled = 7;
+  bool priority_support = 8;
+}
+
+message ListPlansResponse {
+  repeated Plan plans = 1;
+}
+
+message CreateCheckoutSessionRequest {
+  string plan_id = 1 [(buf.validate.field).string.min_len = 1];
+  string success_url = 2 [(buf.validate.field).string.uri = true];
+  string cancel_url = 3 [(buf.validate.field).string.uri = true];
+}
+
+message CheckoutSession {
+  string session_id = 1;
+  string url = 2;  // Redirect user here
+}
+
+message BillingPortalUrl {
+  string url = 1;
+}
+
+message Usage {
+  int32 certificates_count = 1;
+  int32 certificates_limit = 2;
+  int32 cas_count = 3;
+  int32 cas_limit = 4;
+  int32 users_count = 5;
+  int32 users_limit = 6;
+  int32 api_keys_count = 7;
+  int32 api_keys_limit = 8;
+  google.protobuf.Timestamp period_start = 9;
+  google.protobuf.Timestamp period_end = 10;
+}
+
+message Invoice {
+  string invoice_id = 1;
+  string invoice_number = 2;
+  InvoiceStatus status = 3;
+  int64 amount_cents = 4;
+  string currency = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp due_date = 7;
+  google.protobuf.Timestamp paid_at = 8;
+  string pdf_url = 9;
+  string hosted_invoice_url = 10;  // Stripe hosted page
+}
+
+enum InvoiceStatus {
+  INVOICE_STATUS_UNSPECIFIED = 0;
+  INVOICE_STATUS_DRAFT = 1;
+  INVOICE_STATUS_OPEN = 2;
+  INVOICE_STATUS_PAID = 3;
+  INVOICE_STATUS_VOID = 4;
+  INVOICE_STATUS_UNCOLLECTIBLE = 5;
+}
+
+message ListInvoicesRequest {
+  int32 page = 1;
+  int32 limit = 2 [(buf.validate.field).int32 = {gte: 1, lte: 100}];
+}
+
+message ListInvoicesResponse {
+  repeated Invoice invoices = 1;
+  Pagination pagination = 2;
+}
+
+message GetInvoiceRequest {
+  string invoice_id = 1 [(buf.validate.field).string.min_len = 1];
 }
 
 // =============================================================================
@@ -941,46 +1139,27 @@ message DeleteWebhookRequest {
 // =============================================================================
 
 service HealthService {
-  rpc Check(google.protobuf.Empty) returns (HealthCheckResponse) {
-    option (google.api.http) = {
-      get: "/v1/health"
-    };
-  }
-
-  rpc Ready(google.protobuf.Empty) returns (ReadinessCheckResponse) {
-    option (google.api.http) = {
-      get: "/v1/health/ready"
-    };
-  }
+  rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
+  rpc Ready(ReadinessCheckRequest) returns (ReadinessCheckResponse);
 }
+
+message HealthCheckRequest {}
 
 message HealthCheckResponse {
   string status = 1;
   string version = 2;
+  google.protobuf.Timestamp timestamp = 3;
 }
+
+message ReadinessCheckRequest {}
 
 message ReadinessCheckResponse {
   bool ready = 1;
-  map<string, bool> checks = 2;
+  map<string, ComponentHealth> components = 2;
 }
 
-// =============================================================================
-// OCSP SERVICE
-// =============================================================================
-
-service OCSPService {
-  rpc Query(OCSPRequest) returns (OCSPResponse) {
-    option (google.api.http) = {
-      post: "/v1/ocsp"
-      body: "*"
-    };
-  }
-}
-
-message OCSPRequest {
-  bytes request = 1;
-}
-
-message OCSPResponse {
-  bytes response = 1;
+message ComponentHealth {
+  bool healthy = 1;
+  string message = 2;
+  int64 latency_ms = 3;
 }
