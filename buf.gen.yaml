@@ -20,15 +20,11 @@ plugins:
     opt: paths=source_relative
 
   - local: protoc-gen-firestore
-    out: gen/go
+    out: gen/go/purecerts/v1
     opt: paths=source_relative
 
   - local: protoc-gen-inmemory
-    out: gen/go
-    opt: paths=source_relative
-
-  - local: protoc-gen-connect-server
-    out: gen/go
+    out: gen/go/purecerts/v1
     opt: paths=source_relative
 
   - remote: buf.build/bufbuild/es

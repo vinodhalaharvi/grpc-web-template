@@ -7,6 +7,7 @@ option go_package = "github.com/vinodhalaharvi/grpc-web-template/gen/go/purecert
 import "buf/validate/validate.proto";
 import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
+import "options/v1/options.proto";
 
 // =============================================================================
 // COMMON TYPES
@@ -250,6 +251,11 @@ message VerifyEmailRequest {
 // ---------- Invite Messages ----------
 
 message Invite {
+  option (bufplugins.options.v1.entity) = {
+    collection: "invites"
+    id_field: "invite_id"
+  };
+
   string invite_id = 1;
   string tenant_id = 2;
   string email = 3;
@@ -335,6 +341,11 @@ message BackupCodesResponse {
 }
 
 message User {
+  option (bufplugins.options.v1.entity) = {
+    collection: "users"
+    id_field: "user_id"
+  };
+
   string user_id = 1;
   string tenant_id = 2;
   string email = 3;
@@ -410,6 +421,11 @@ service TenantService {
 }
 
 message Tenant {
+  option (bufplugins.options.v1.entity) = {
+    collection: "tenants"
+    id_field: "tenant_id"
+  };
+
   string tenant_id = 1;
   string name = 2;
   TenantSettings settings = 3;
@@ -471,6 +487,11 @@ service CertificateService {
 }
 
 message Certificate {
+  option (bufplugins.options.v1.entity) = {
+    collection: "certificates"
+    id_field: "cert_id"
+  };
+
   string cert_id = 1;
   string common_name = 2;
   string serial_number = 3;
@@ -624,6 +645,11 @@ service CAService {
 }
 
 message CA {
+  option (bufplugins.options.v1.entity) = {
+    collection: "cas"
+    id_field: "ca_id"
+  };
+
   string ca_id = 1;
   string name = 2;
   CAType type = 3;
@@ -784,6 +810,11 @@ service AuditService {
 }
 
 message AuditLog {
+  option (bufplugins.options.v1.entity) = {
+    collection: "audit_logs"
+    id_field: "log_id"
+  };
+
   string log_id = 1;
   string tenant_id = 2;
   string user_id = 3;
@@ -879,6 +910,11 @@ service SessionService {
 }
 
 message Session {
+  option (bufplugins.options.v1.entity) = {
+    collection: "sessions"
+    id_field: "session_id"
+  };
+
   string session_id = 1;
   string user_id = 2;
   string ip_address = 3;
@@ -933,6 +969,11 @@ service APIKeyService {
 }
 
 message APIKey {
+  option (bufplugins.options.v1.entity) = {
+    collection: "api_keys"
+    id_field: "key_id"
+  };
+
   string key_id = 1;
   string name = 2;
   string key_prefix = 3;        // First 8 chars for identification: "pc_live_abc12345..."
@@ -1015,6 +1056,11 @@ service BillingService {
 }
 
 message Subscription {
+  option (bufplugins.options.v1.entity) = {
+    collection: "subscriptions"
+    id_field: "subscription_id"
+  };
+
   string subscription_id = 1;
   string plan_id = 2;
   string plan_name = 3;
@@ -1038,6 +1084,11 @@ enum SubscriptionStatus {
 }
 
 message Plan {
+  option (bufplugins.options.v1.entity) = {
+    collection: "plans"
+    id_field: "plan_id"
+  };
+
   string plan_id = 1;
   string name = 2;               // "Starter", "Pro", "Enterprise"
   string description = 3;
@@ -1099,6 +1150,11 @@ message Usage {
 }
 
 message Invoice {
+  option (bufplugins.options.v1.entity) = {
+    collection: "invoices"
+    id_field: "invoice_id"
+  };
+
   string invoice_id = 1;
   string invoice_number = 2;
   InvoiceStatus status = 3;

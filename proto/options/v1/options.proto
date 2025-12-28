@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package bufplugins.options.v1;
+
+option go_package = "github.com/vinodhalaharvi/grpc-web-template/gen/go/options/v1;optionsv1";
+
+import "google/protobuf/descriptor.proto";
+
+// EntityOptions marks a message for Firestore repository generation
+extend google.protobuf.MessageOptions {
+  EntityOptions entity = 50000;
+}
+
+message EntityOptions {
+  // Generate repository for this message (default: true if option present)
+  bool generate = 1;
+  
+  // Firestore collection name (default: snake_case of message name + "s")
+  string collection = 2;
+  
+  // Field name to use as document ID (default: "id" or first field ending in "_id")
+  string id_field = 3;
+}
+
+// FieldOptions for additional field-level configuration
+extend google.protobuf.FieldOptions {
+  StorageFieldOptions storage = 50001;
+}
+
+message StorageFieldOptions {
+  // Create Firestore index for this field
+  bool indexed = 1;
+  
+  // Field must be unique across collection
+  bool unique = 2;
+  
+  // Field cannot be updated after creation
+  bool immutable = 3;
+  
+  // Exclude from Firestore document (computed field)
+  bool exclude = 4;
+}
