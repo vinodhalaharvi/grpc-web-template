@@ -5,42 +5,39 @@ managed:
     - file_option: go_package_prefix
       value: github.com/vinodhalaharvi/grpc-web-template/gen/go
   disable:
-    # Don't generate Go code for google packages - use official modules
     - file_option: go_package
       module: buf.build/googleapis/googleapis
     - file_option: go_package
       module: buf.build/bufbuild/protovalidate
 
 plugins:
-  # ============================================
-  # Go Backend
-  # ============================================
-
-  # Go protobuf messages
   - remote: buf.build/protocolbuffers/go
     out: gen/go
     opt: paths=source_relative
 
-  # Connect-RPC server
   - remote: buf.build/connectrpc/go
     out: gen/go
     opt: paths=source_relative
 
-  # ============================================
-  # TypeScript Frontend
-  # ============================================
+  - local: protoc-gen-firestore
+    out: gen/go
+    opt: paths=source_relative
 
-  # TypeScript protobuf messages
+  - local: protoc-gen-inmemory
+    out: gen/go
+    opt: paths=source_relative
+
+  - local: protoc-gen-connect-server
+    out: gen/go
+    opt: paths=source_relative
+
   - remote: buf.build/bufbuild/es
     out: gen/ts
     opt: target=ts
 
-  # Connect-RPC client
   - remote: buf.build/connectrpc/es
     out: gen/ts
     opt: target=ts
 
-  # React Query hooks (optional)
-  - remote: buf.build/connectrpc/query-es
-    out: gen/ts
-    opt: target=ts
+inputs:
+  - directory: proto
