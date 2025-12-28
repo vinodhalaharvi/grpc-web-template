@@ -19,10 +19,6 @@ plugins:
     out: gen/go
     opt: paths=source_relative
 
-  - local: protoc-gen-firestore
-    out: gen/go
-    opt: paths=source_relative
-
   - remote: buf.build/bufbuild/es
     out: gen/ts
     opt: target=ts
@@ -30,10 +26,15 @@ plugins:
   - remote: buf.build/connectrpc/es
     out: gen/ts
     opt: target=ts
-    
+
   - local: protoc-gen-connect-server
     out: gen/go
     opt: paths=source_relative
+
+  - local: protoc-gen-firestore
+    out: gen/go
+    opt: paths=source_relative
+
 
 inputs:
   - directory: proto
