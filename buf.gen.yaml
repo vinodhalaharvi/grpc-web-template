@@ -6,35 +6,30 @@ managed:
       value: github.com/vinodhalaharvi/grpc-web-template/gen/go
   disable:
     - file_option: go_package
-      module: buf.build/googleapis/googleapis
-    - file_option: go_package
       module: buf.build/bufbuild/protovalidate
 
 plugins:
   - remote: buf.build/protocolbuffers/go
     out: gen/go
     opt: paths=source_relative
-
   - remote: buf.build/connectrpc/go
     out: gen/go
     opt: paths=source_relative
-
-  - remote: buf.build/bufbuild/es
-    out: gen/ts
-    opt: target=ts
-
-  - remote: buf.build/connectrpc/es
-    out: gen/ts
-    opt: target=ts
-
-  - local: protoc-gen-connect-server
-    out: gen/go
-    opt: paths=source_relative
-
   - local: protoc-gen-firestore
     out: gen/go
     opt: paths=source_relative
-
+  - local: protoc-gen-wire
+    out: gen/go
+    opt: paths=source_relative
+  - local: protoc-gen-connect-server
+    out: gen/go
+    opt: paths=source_relative
+  - remote: buf.build/bufbuild/es
+    out: gen/ts
+    opt: target=ts
+  - remote: buf.build/connectrpc/es
+    out: gen/ts
+    opt: target=ts
 
 inputs:
   - directory: proto
